@@ -1,8 +1,9 @@
 # Frequently asked questions
 
 **Help says my AI is "not installed".**
-Install it from the vendor (Claude: claude.com/download; ChatGPT/Codex: developers.openai.com/codex; Google:
-antigravity.google), then press *Check again* or *Test*. To sign in, press *Sign in*: a window opens where you log in once.
+Install it from the vendor (Claude Code, the command-line app, not the desktop app: code.claude.com/docs/en/quickstart;
+ChatGPT/Codex: developers.openai.com/codex; Google: antigravity.google), then press *Check again* or *Test*. To sign
+in, press *Sign in*: a window opens where you log in once.
 
 **"Your AI plan's usage limit is reached."**
 Plans have a limit per few hours. Wait until it resets, or choose *Economy* in Settings → AI (uses less of your plan).

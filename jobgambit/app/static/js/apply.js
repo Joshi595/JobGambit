@@ -28,7 +28,8 @@ document.addEventListener("alpine:init", () => {
     STEPS: ["review", "ready", "sent"],
     key: "", job: null, stage: "", fit: null, prop: null, files: [], usage: [], folder: "", docs: [], saving: null, checks: null, design: "", loading: true, again: null,
     busy: "", err: "", dec: {}, applied: null, missing: [], rule: "", ruleFor: "cv_rules", ruleNote: "", designs: [], looks: [], method: "company website", note: "", done: null, ask: "", changes: [], redo: "",
-    edits: {}, show: "all", diffs: [],  // review cards: which show their text box, the filter; the Documents step's last changes
+    edits: {}, diffs: [], byId: {},  // review blocks shown as text boxes (by block id); the Documents step's last changes; cards by id
+    head: { subject: "", salutation: "" },  // the letter's subject and salutation, editable at the top of its block
     applicants: null,  // how many applied (LinkedIn postings), asked once a day
     LANGS: ["en", "de", "fr", "es", "it", "nl", "pt", "pl", "sv", "da"],
     async init() {
@@ -45,6 +46,7 @@ document.addEventListener("alpine:init", () => {
       api("/api/setup/ready").then(r => { this.missing = r.missing; }).catch(() => {});
       if (this.job) api(`/api/jobs/${this.key}/applicants`, { method: "POST" }).then(r => { this.applicants = r.applicants; }).catch(() => {});
       this.$watch("dec", () => this.saveChoices());
+      this.$watch("head", () => this.saveChoices());
       if (this.stage === "drafting") return this.waitDraft();
       if (this.stage === "ready") this.makeCurrent();
       const fresh = ["new", "fit", "blocked"].includes(this.stage);  // "fit": a work folder from before the fit check was dropped
@@ -63,7 +65,6 @@ document.addEventListener("alpine:init", () => {
       api(`/api/apply/${this.key}/current`, { method: "POST" }).then(r => { if (r.warning) this.err = r.warning; }).catch(() => {});
     },
     stepNo() { return this.done ? 2 : Math.max(0, this.STEPS.indexOf(this.stage)); },
-    tally(d) { return Object.values(this.dec).filter(x => x.decision === d).length; },
     load(s) {
       if (s.job) this.job = s.job;
       if ("applied" in s) this.applied = s.applied;
@@ -72,14 +73,19 @@ document.addEventListener("alpine:init", () => {
       if (this.prop) this.resetDecisions(s.choices);
     },
     resetDecisions(saved = null) {  // saved: the choices made before leaving the page
-      this.dec = {}; this.edits = {}; this.show = "all";
-      for (const i of [...this.prop.items, ...this.prop.letter])
+      this.dec = {}; this.edits = {};
+      const all = [...this.prop.items, ...this.prop.letter], m = this.prop.letter_meta || {};
+      this.byId = Object.fromEntries(all.map(c => [c.id, c]));
+      for (const i of all)  // a flagged line starts on Before: only the person can confirm it
         this.dec[i.id] = saved?.[i.id] || { decision: i.flag ? "reject" : "accept", text: i.new, comment: "" };
+      this.head = { subject: saved?.subject?.text ?? m.subject ?? "", salutation: saved?.salutation?.text ?? m.salutation ?? "" };
     },
-    saveChoices() {  // each click on a review card is kept (debounced), so stopping half-way loses nothing
+    saveChoices() {  // each click is kept (debounced), so stopping half-way loses nothing
       clearTimeout(this.saving);
       if (this.stage !== "review") return;
-      this.saving = setTimeout(() => api(`/api/apply/${this.key}/choices`, { method: "PUT", json: { choices: this.dec } }).catch(() => {}), 600);
+      const choices = { ...this.dec, ...Object.fromEntries(this.headItems().map(h => [h.id, h])) };
+      this.saving = setTimeout(() => api(`/api/apply/${this.key}/choices`, { method: "PUT", json: { choices } })
+        .then(r => { if (r.terms && this.prop) this.prop.terms = r.terms; }).catch(() => {}), 600);  // the keyword bar these choices make
     },
     async step(label, fn) {
       this.busy = label; this.err = ""; this.again = () => this.step(label, fn);
@@ -94,7 +100,7 @@ document.addEventListener("alpine:init", () => {
         this.stage = "review"; this.resetDecisions();
       });
     },
-    langName(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code); } catch { return code; } },
+    langName(code) { try { return new Intl.DisplayNames([document.documentElement.lang], { type: "language" }).of(code); } catch { return code; } },
     startOver(note = "", language = "") {  // throw this draft away and write a new one (one more AI run)
       if (!confirm(t("apply.start_over_confirm"))) return;
       clearTimeout(this.saving);
@@ -105,25 +111,43 @@ document.addEventListener("alpine:init", () => {
         this.stage = "review"; this.resetDecisions();
       });
     },
-    kind(c, letter) {  // what sort of change a card is (its tag, the summary, the filter)
-      return letter ? "letter" : "order" in c ? "order" : c.id === "summary" ? "summary" : c.id.startsWith("skills_") ? "skills"
-        : !c.new ? "removed" : /reviewer/i.test(`${c.reason} ${c.section}`) ? "reviewer" : "reworded";
+    card(id) { return this.byId[id]; },
+    todo(s) { return this.prop.items.filter(c => c.group === s.id && !c.same); },  // what a block asks the person
+    title(s) { return s.kind === "entry" ? s.title : t("apply.sec." + s.kind); },
+    editing(s) { return !!this.prop.final || !!this.edits[s.id]; },  // Change text: every line is a text box from the start
+    asks(id) { const c = this.card(id); return !!c && (!c.same || this.dec[id].text !== c.new); },  // a choice (a no-op the person edited is one)
+    toggles(s, a) { return this.asks(a.card) && !this.editing(s); },  // a click switches this line
+    orderOff(s) { return !!s.order && this.dec[s.order]?.decision === "reject"; },
+    chosen(s, a) {  // which side of a row will print: "now" (After), "was" (Before) or "same" (nothing to choose)
+      if (this.asks(a.card)) return this.dec[a.card].decision === "reject" ? "was" : "now";
+      if (s.kind === "projects" && s.order && s.before.find(b => b.id === a.id).text !== a.text) return this.orderOff(s) ? "was" : "now";
+      return a.auto ? "now" : "same";
     },
-    summary() {
-      const n = {};
-      for (const c of this.prop.items) n[this.kind(c)] = (n[this.kind(c)] || 0) + 1;
-      const parts = Object.entries(n).map(([k, v]) => `${v} ${t("apply.kind." + k).toLowerCase()}`);
-      return t("apply.sum", { n: this.prop.items.length, parts: parts.join(" · ") }) +
-        (this.prop.letter.length ? " · " + t("apply.sum_letter", { n: this.prop.letter.length }) : "");
+    spans(text) { return wordDiff("", text).map(w => ({ ...w, op: "" })); },  // a line as it prints: bold, nothing marked
+    cells(s, k) {  // one row's [Before, After] words: removed words marked on the left, added ones on the right
+      const was = s.before[k].text, a = s.after[k], now = a.card ? this.dec[a.card].text : a.text;
+      if (!this.asks(a.card) && !a.auto) return [this.spans(was), this.spans(now)];
+      const d = wordDiff(was, now);
+      return [this.side(d, "was"), this.side(d, "now")];
     },
-    visible(c, letter) {
-      return this.show === "all" || (this.show === "flagged" ? c.flag : ["reworded", "reviewer"].includes(this.kind(c, letter)));
+    toggle(id) { this.dec[id].decision = this.dec[id].decision === "reject" ? "accept" : "reject"; },
+    blockState(s) {  // "accept" (Keep after), "reject" (Keep before) or "" (some of each)
+      const d = this.todo(s).map(c => this.dec[c.id].decision === "reject" ? "reject" : "accept");
+      return d.every(x => x === d[0]) ? d[0] : "";
     },
-    editing(c) { return this.edits[c.id] ?? !!this.prop.final; },  // Change text: every line is a text box from the start
-    diffOf(c) {  // the suggestion (or the person's edit of it), its changed words marked against the original; a card
-      // kept as it was still shows what was suggested, dimmed
-      const now = this.dec[c.id].text;
-      return c.old ? wordDiff(c.old, now) : wordDiff("", now).map(w => ({ ...w, op: "" }));
+    setBlock(s, d) { for (const c of this.prop.items) if (c.group === s.id) this.dec[c.id].decision = d; },
+    counts() {  // the footer: new text, kept as before, for AI to rewrite, nothing to choose
+      const n = { a: 0, r: 0, c: 0, u: 0 };
+      for (const c of [...this.prop.items, ...this.prop.letter]) {
+        const d = this.dec[c.id];
+        n[c.same ? "u" : d.comment.trim() ? "c" : d.decision === "reject" ? "r" : "a"]++;
+      }
+      return n;
+    },
+    headItems() {  // subject and salutation, when edited at the top of the letter
+      const m = this.prop.letter_meta || {};
+      return ["subject", "salutation"].filter(k => this.head[k].trim() && this.head[k] !== (m[k] || ""))
+        .map(k => ({ id: k, decision: "edit", text: this.head[k].trim(), comment: "" }));
     },
     // a diff read as one whole sentence: "now" (what the document will say, added words marked) or "was" (the
     // original, removed words marked). Both in one line jumble the two sentences.
@@ -132,21 +156,25 @@ document.addEventListener("alpine:init", () => {
       return s.map((w, i) => w.op && !w.t.trim() && !(s[i - 1]?.op && s[i + 1]?.op) ? { ...w, op: "" } : w);
     },
     said(diff, which) { return this.side(diff, which).some(w => w.t.trim()); },
-    steps(s) {  // "1. A  2. B   Left out: C" -> ["A", "B"] (the list numbers them)
-      return (s || "").split(/\s{2,}/).filter(x => x && !x.startsWith("Left out:")).map(x => x.replace(/^\d+\.\s*/, ""));
-    },
-    leftOut(s) { return (s || "").split(/\s{2,}/).find(x => x.startsWith("Left out:")) || ""; },
-    covered(k) {  // keyword appears in what the CV will say
-      const texts = [this.prop.context, ...Object.values(this.dec).filter(d => d.decision !== "reject").map(d => d.text)];
-      return texts.join(" ").toLowerCase().includes(k.toLowerCase());
+    // The posting's keywords (parts/keywords.html), as the server matched them against the CV that will print: in the
+    // CV, they have it (the CV doesn't say it yet), related experience, not in their profile.
+    kwGroups(terms = []) { return ["cv", "add", "related", "missing"].map(id => ({ id, terms: terms.filter(k => k.group === id) })).filter(g => g.terms.length); },
+    askable(k) { return this.stage === "review" && k.group === "add" && !!this.dec[k.card]; },
+    kwAsk(k) { return t("apply.kw.ask", { term: k.term }); },
+    asked(k) { return !!this.dec[k.card]?.comment.includes(this.kwAsk(k)); },
+    askAdd(k) {  // one click: a comment that sends the line whose fact names it to the revise run (a second click takes it back)
+      const d = this.dec[k.card], ask = this.kwAsk(k);
+      d.comment = this.asked(k) ? d.comment.replace(ask, "").trim() : [d.comment.trim(), ask].filter(Boolean).join(" ");
+      const g = this.card(k.card)?.group;
+      if (g) this.edits[g] = true;  // its block shows the comment
     },
     changedCount() { return this.finalItems().length; },
     finalItems() {  // Change text: only what the person changed (an edit) or asked AI about (a comment) goes back
-      return [...this.prop.items, ...this.prop.letter].flatMap(c => {
+      return [...[...this.prop.items, ...this.prop.letter].flatMap(c => {
         const d = this.dec[c.id];
         return d.comment.trim() ? [{ id: c.id, decision: "revise", text: c.new, comment: d.comment }]
              : d.text !== c.new ? [{ id: c.id, decision: "edit", text: d.text.trim(), comment: "" }] : [];
-      });
+      }), ...this.headItems()];
     },
     editText() {
       this.step(t("working"), async () => {
@@ -157,11 +185,11 @@ document.addEventListener("alpine:init", () => {
     },
     submit(nothing = false) {
       clearTimeout(this.saving);  // a late choices save would bring back what this submit decides
-      const items = this.prop.final ? (nothing ? [] : this.finalItems()) : Object.entries(this.dec).map(([id, d]) => {
-        const card = [...this.prop.items, ...this.prop.letter].find(i => i.id === id);
-        const decision = d.decision === "accept" && d.text !== card.new ? "edit" : d.decision;
-        return { id, decision, text: decision === "reject" ? card.old : d.text, comment: d.comment };
-      });
+      const items = this.prop.final ? (nothing ? [] : this.finalItems()) : [...[...this.prop.items, ...this.prop.letter].map(card => {
+        const d = this.dec[card.id];  // a line with a comment goes to AI; Keep before sends the original back
+        const decision = d.comment.trim() ? "revise" : d.decision === "reject" ? "reject" : d.text !== card.new ? "edit" : "accept";
+        return { id: card.id, decision, text: decision === "reject" ? card.old : d.text, comment: d.comment };
+      }), ...this.headItems()];
       this.step(t("apply.building"), async () => {
         const r = await api(`/api/apply/${this.key}/decide`, { json: { items } });
         if (r.stage === "review") { this.prop = r.proposal; this.resetDecisions(); this.stage = "review"; }
@@ -174,7 +202,7 @@ document.addEventListener("alpine:init", () => {
         const r = await api(`/api/apply/${this.key}/change`, { json: { request: this.ask } });
         if (r.restart) return setTimeout(() => this.startOver(this.ask, r.restart));  // another language: a new draft in it
         this.files = r.files; this.checks = r.checks; this.diffs = r.diffs || [];
-        this.changes = this.diffs.length ? [] : [t("apply.docs_ai_none")];
+        this.changes = [...(r.refused || []), ...(this.diffs.length ? [] : [t("apply.docs_ai_none")])];  // refused: it would claim a skill
         this.ask = ""; if (r.warning) this.err = r.warning;
       });
     },

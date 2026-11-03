@@ -2,6 +2,7 @@
 const SECTION_OF = { part_time: "full_time", graduate: "full_time", freelance: "full_time" };
 const STATUS_SECTION = { applying: "applying", starred: "shortlisted" };
 window.personalSections = () => ["applying", "starred"];  // the Board's sections of the person's own lists
+const MOVES = { shortlisted: "board.starred_one" };  // ⭐: the posting leaves its job-type list for Starred (a toast, Undo)
 
 document.addEventListener("alpine:init", () => {
   Alpine.data("board", () => ({
@@ -33,14 +34,14 @@ document.addEventListener("alpine:init", () => {
     },
     sectionOf(j) { const s = SECTION_OF[j.type] || j.type || "full_time"; return this.sections().includes(s) ? s : this.sections()[0]; },
     byStatus(s) { return STATUS_SECTION[s] !== undefined; },  // ⭐ / ⚡: every job type in one list
-    inSection(j, s) { return this.byStatus(s) ? j.status === STATUS_SECTION[s] : this.sectionOf(j) === s; },
+    inSection(j, s) { return this.byStatus(s) ? j.status === STATUS_SECTION[s] : this.sectionOf(j) === s && !MOVES[j.status]; },
     inCountry(j) { return !this.country || !j.country || j.country === this.country; },  // no known country: shown everywhere;
     // the person's own lists (In progress, Starred…): the country filter never hides them
     count(s) { return s === "less" ? (this.less ? this.less.filter(j => this.inCountry(j)).length : this.country ? null : Alpine.store("app").n.less ?? 0)
                                    : this.jobs.filter(j => this.inSection(j, s) && (this.byStatus(s) || this.inCountry(j))).length; },
     rows() { return this.section === "less" ? this.less || [] : this.jobs.filter(j => this.inSection(j, this.section)); },
     countries() { return [...new Set([this.country, ...this.rows().map(j => j.country)].filter(Boolean))]; },
-    countryName(c) { try { return new Intl.DisplayNames(["en"], { type: "region" }).of(c); } catch { return c; } },
+    countryName(c) { try { return new Intl.DisplayNames([document.documentElement.lang], { type: "region" }).of(c); } catch { return c; } },
     matching() {
       const q = this.q.toLowerCase(), since = this.days && new Date(Date.now() - this.days * 864e5).toISOString().slice(0, 10);
       return this.rows().filter(j => (this.byStatus(this.section) || this.inCountry(j)) && (this.section !== "less" || !this.reason || j.reason === this.reason)
@@ -66,7 +67,10 @@ document.addEventListener("alpine:init", () => {
       return t("board.last", { when: last === new Date().toISOString().slice(0, 10) ? t("board.today") : fmtDate(last) })
         + (bad ? " · " + t("board.problems", { n: bad }) : "") + ".";
     },
-    band(s) { return s >= 60 ? "strong" : s >= 40 ? "good" : s >= 20 ? "possible" : "long"; },
+    band(s) {  // score.BANDS, from /api/state
+      const b = Alpine.store("app").state?.bands || { strong: 50, good: 35, possible: 25 };
+      return s >= b.strong ? "strong" : s >= b.good ? "good" : s >= b.possible ? "possible" : "long";
+    },
     meta(j) {
       const when = j.posted ? t("board.posted", { d: fmtDate(j.posted.slice(0, 10)) }) : t("board.seen", { d: fmtDate(j.first_seen) });
       return [j.company, j.location, j.source + (j.site_url ? " · " + t("board.also_site") : ""), when].filter(Boolean).join(" · ");
@@ -104,6 +108,8 @@ document.addEventListener("alpine:init", () => {
       if (status === "skipped") {  // gone from the board at once, with a few seconds to take it back
         this.jobs = this.jobs.filter(x => x !== j);
         Alpine.store("toast").show(t("board.skipped"), "ok", async () => { await this.setStatus(j, "new"); if (j.status === "new") this.jobs.push(j); });
+      } else if (MOVES[status] && !this.byStatus(this.section) && this.section !== "less") {  // Less relevant: keep() says it
+        Alpine.store("toast").show(t(MOVES[status]), "ok", () => this.setStatus(j, "new"));
       }
       Alpine.store("app").counts();
     },

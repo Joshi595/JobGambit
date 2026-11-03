@@ -22,7 +22,7 @@ class FakeCLI(ai.Agent):
     def path(self):
         return sys.executable
 
-    def command(self, schema, step=""):
+    def command(self, schema, step="", folder=""):
         out, err, code = self.outputs.pop(0)
         return ["-c", f"import sys; sys.stdout.write({out!r}); sys.stderr.write({err!r}); sys.exit({code})"]
 
@@ -40,6 +40,8 @@ def test_answer_retries_once_then_gives_up():
 def test_usage_limit_and_errors():
     with pytest.raises(ai.UsageLimit):
         ai.answer("p", Ping, FakeCLI(("", "Claude usage limit reached, resets 5pm", 1)))
+    with pytest.raises(ai.UsageLimit):  # Claude Code's wording, 2026-10-31: 25 postings failed instead of waiting
+        ai.answer("p", Ping, FakeCLI(("", "You've hit your 5-hour limit · resets 9:40pm (Europe/Berlin)", 1)))
     with pytest.raises(ai.AIError):
         ai.answer("p", Ping, FakeCLI(("not json", "", 0)))
 
@@ -161,6 +163,33 @@ def test_pages_run_only_their_own_scripts(tmp_path, monkeypatch):
     api = c.get("/api/health", headers={"x-token": server.TOKEN})
     assert api.headers["x-content-type-options"] == "nosniff" and api.headers["referrer-policy"] == "no-referrer"
     assert "content-security-policy" not in api.headers
+
+
+def test_the_page_comes_in_the_app_language(tmp_path, monkeypatch):
+    """<html lang> tells app.js which texts to load: the chosen language when there's a file for it, else English."""
+    monkeypatch.setenv("JOBGAMBIT_HOME", str(tmp_path))
+    from jobgambit.app import server
+    from jobgambit.core import profile as pf
+    c = TestClient(server.app, base_url="http://127.0.0.1")
+    for lang, html in (("de", 'lang="de"'), ("xx", 'lang="en"')):
+        pf.write("preferences", {**pf.read("preferences"), "app_language": lang})
+        assert html in c.get(f"/?k={server.launch_code()}").text
+
+
+def test_every_language_has_every_text_with_its_placeholders():
+    """A text missing from de.json would show in English; a lost {n} would show without its number."""
+    import re
+    from jobgambit.app import server
+    en = json.loads((server.HERE / "i18n" / "en.json").read_text(encoding="utf-8"))
+
+    def texts(d, p=""):
+        if isinstance(d, dict):
+            return {k: v for key, sub in d.items() for k, v in texts(sub, f"{p}{key}.").items()}
+        if isinstance(d, list):
+            return {k: v for i, sub in enumerate(d) for k, v in texts(sub, f"{p}{i}.").items()}
+        return {p: sorted(re.findall(r"\{\w+\}", d))}
+    for f in (server.HERE / "i18n").glob("*.json"):
+        assert texts(json.loads(f.read_text(encoding="utf-8"))) == texts(en), f.name
 
 
 def test_launch_code_is_kept_and_a_second_start_opens_the_running_app(tmp_path, monkeypatch):
@@ -315,20 +344,28 @@ def _strict_ok(s, path="$"):
             _strict_ok(v, f"{path}[{i}]")
 
 
-def test_codex_schemas_are_strict_and_answers_come_back():
+def app_models() -> set:
+    """Every pydantic model in the app, each module imported first (app/ and core/ have no __init__.py, so
+    pkgutil.walk_packages never went into them: only models other tests had imported were checked)."""
     import importlib
-    import pkgutil
+    from pathlib import Path
     import jobgambit
-    for m in pkgutil.walk_packages(jobgambit.__path__, "jobgambit."):
-        if ".countries." not in m.name:
-            importlib.import_module(m.name)
+    root = Path(jobgambit.__file__).parent
+    for f in root.rglob("*.py"):
+        name = ".".join(f.relative_to(root.parent).with_suffix("").parts)
+        if ".countries." not in name and not name.endswith("__init__"):
+            importlib.import_module(name)
 
     def models(cls):
         for sub in cls.__subclasses__():
             yield sub
             yield from models(sub)
-    found = {m for m in models(BaseModel) if m.__module__.startswith("jobgambit")}
-    assert len(found) > 20
+    return {m for m in models(BaseModel) if m.__module__.startswith("jobgambit")}
+
+
+def test_codex_schemas_are_strict_and_answers_come_back():
+    found = app_models()
+    assert len(found) > 40
     for m in found:
         _strict_ok(ai.strict(m.model_json_schema()), m.__name__)
 
@@ -357,3 +394,105 @@ def test_backup_leaves_out_the_run_logs():
     (data.home() / "notes.txt").write_text("kept", encoding="utf-8")
     names = zipfile.ZipFile(io.BytesIO(system.backup())).namelist()
     assert "notes.txt" in names and not any(n.startswith("logs/") for n in names)
+
+
+def test_no_ai_schema_has_characters_cmd_acts_on():
+    """Claude and Antigravity get the schema on their command line. Started through npm's claude.cmd on Windows, cmd.exe
+    reads that line again: a > | & ^ % outside its quotes ("Category -> skills") broke every CV import, while Help's
+    Test (a tiny schema) passed."""
+    import re
+    for m in app_models():
+        text = json.dumps(m.model_json_schema())
+        assert not re.search(r"[<>|&^%]", text), (m.__name__, re.findall(r'"[^"]*[<>|&^%][^"]*"', text))
+
+
+class Says(FakeCLI):
+    """Runs the given Python code as the AI app."""
+
+    def __init__(self, code):
+        self.code = code
+
+    def command(self, schema, step="", folder=""):
+        return ["-c", self.code]
+
+
+def test_ai_app_trouble_becomes_a_message(tmp_path):
+    """Output that isn't valid UTF-8 is read anyway; a program that can't start, an answer of another kind: an AIError
+    the page shows, never an error page."""
+    raw = Says("import sys; sys.stdout.buffer.write(b'{\"ok\": true, \"note\": \"\\xff\"}')")
+    assert ai.answer("p", Ping, raw).ok is True
+    (tmp_path / "notes.txt").write_text("not a program", encoding="utf-8")
+    gone = Says("")
+    gone.path = lambda: str(tmp_path / "notes.txt")
+    with pytest.raises(ai.AIError, match="couldn't be started"):
+        ai.answer("p", Ping, gone)
+
+    class Listy(ai.Antigravity):
+        def path(self):
+            return sys.executable
+
+        def command(self, schema, step="", folder=""):
+            return ["-c", "print('[1, 2]')"]
+    with pytest.raises(ai.AIError, match="isn't the JSON asked for"):
+        Listy().run("p", {})
+
+
+def test_claude_reads_only_a_file_it_was_given(tmp_path):
+    c = ai.Claude()
+    assert c.command({}, "Profile", str(tmp_path))[c.command({}).index("--tools") + 1] == ""
+    (tmp_path / "cv.png").write_bytes(b"\x89PNG")
+    assert c.command({}, "Profile", str(tmp_path))[c.command({}).index("--tools") + 1] == "Read"
+
+
+FAKE_CODEX = """import sys
+args = sys.argv[1:]
+print("codex 0.99 - reading the prompt from stdin; tokens used: 42")  # what Codex prints besides its answer
+open(args[args.index("--output-last-message") + 1], "w").write(sys.stdin.read().split("ANSWER:")[1])
+"""
+
+
+def test_codex_answers_from_its_answer_file(tmp_path):
+    """Codex's final message comes from --output-last-message, whatever else it prints; an answer that fits neither
+    schema is an AIError. A photo goes in with -i, ahead of the prompt's "-" (which -i would take for a file)."""
+    from jobgambit.core.profile import Profile
+    (tmp_path / "codex.py").write_text(FAKE_CODEX, encoding="utf-8")
+
+    class Fake(ai.Codex):
+        def path(self):
+            return sys.executable
+
+        def command(self, schema, step="", folder=""):
+            return [str(tmp_path / "codex.py"), *super().command(schema, step, folder)]
+    assert ai.answer('ANSWER:{"ok": true}', Ping, Fake()).ok is True
+    with pytest.raises(ai.AIError, match="can't read"):
+        Fake().run('ANSWER:{"skills": [1]}', Profile.model_json_schema())
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "cv.png").write_bytes(b"\x89PNG")
+    args = ai.Codex().command({}, "Profile", str(run))
+    assert args[1:3] == ["-i", str(run / "cv.png")] and args[-1] == "-" and str(run / "answer.json") in args
+
+
+def test_a_run_that_hangs_ends_on_time_with_all_it_started():
+    """npm's claude.cmd starts node.exe, which keeps the pipes open after the launcher is killed: a timeout once left
+    the request waiting forever. The whole tree goes."""
+    import time
+    hangs = Says("import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); time.sleep(30)")
+    start = time.time()
+    with pytest.raises(ai.AIError, match="didn't answer within 1 seconds"):
+        hangs.run("p", {}, timeout=1)
+    assert time.time() - start < 15
+
+
+def test_an_ai_app_installed_after_jobgambit_started_is_found(tmp_path, monkeypatch):
+    """The installers start JobGambit with the PATH from before the AI app was installed: its usual folders count too."""
+    from pathlib import Path
+    bin_dir = tmp_path / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in ("agy", "agy.exe"):
+        (bin_dir / name).write_text("")
+        (bin_dir / name).chmod(0o755)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    assert Path(ai.Antigravity().path()).parent == bin_dir

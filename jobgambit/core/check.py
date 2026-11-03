@@ -1,5 +1,5 @@
-"""Quality gate for a tailored CV or letter: banned phrases, invented numbers, unbacked reach claims,
-keyword coverage, page count, extractable text (ATS) and layout. Ported from the original pipeline's check.py."""
+"""Quality gate for a tailored CV or letter: banned phrases, invented numbers and tools, unbacked reach claims, page
+count, extractable text (ATS) and layout. Ported from the original pipeline's check.py. (Keyword coverage: apply.keywords.)"""
 import datetime
 import re
 
@@ -72,12 +72,6 @@ def adoption_claims(text, source):
     return [m[0] for claim, backing in ADOPTION if not re.search(backing, source, re.I) for m in re.finditer(claim, text, re.I)]
 
 
-def coverage(text, keywords):
-    low = " ".join(text.lower().split())
-    hit = [k for k in keywords if k.lower() in low]
-    return hit, [k for k in keywords if k not in hit]
-
-
 def layout(pdf):
     """(fails, warns) from text positions: stranded headings or titles at a page end, early page ends,
     a single word alone on the last line of a bullet."""
@@ -122,29 +116,45 @@ def layout(pdf):
     return fails, warns
 
 
+def visible(node) -> list[str]:
+    """Every text of a profile the person can see (keys too: skill categories), never tags or ids."""
+    if isinstance(node, dict):
+        return [x for k, v in node.items() if k not in ("tags", "id") for x in (str(k), *visible(v))]
+    if isinstance(node, list):
+        return [x for v in node for x in visible(v)]
+    return [str(node)] if node not in (None, "") else []
+
+
 def source_text(posting: str = "") -> str:
-    """Everything a document may state: the master profile, the posting, today's date."""
-    path = pf.folder() / pf.FILES["profile"]
-    master = path.read_text(encoding="utf-8") if path.exists() else ""
-    return master + "\n" + posting + datetime.date.today().strftime(" %d.%m.%Y %Y-%m-%d")
+    """Everything a document may state: what the master profile shows (no tags, ids or YAML comments: "DevOps" only in a
+    hidden tag backs nothing), today's date, and for the letter the posting (facts about the employer). A CV's skills
+    and tools must come from the person's own profile, never from the posting. Their start and availability (hours a
+    week, studies until…) are theirs too."""
+    from jobgambit.core import apply
+    pr = apply.prefs()
+    return "\n".join([*visible(pf.read("profile")), pr.start, apply.availability(pr), posting]) + \
+        datetime.date.today().strftime(" %d.%m.%Y %Y-%m-%d")
 
 
 def asked_missing(n: int = 15) -> list[tuple[str, int]]:
-    """Over every archived application: the posting keywords the master CV never mentions, most asked first.
-    What to learn (or add to the CV, if it's true) next."""
+    """Over every application: the skills its posting asked for that the person doesn't have (the skill map's concepts,
+    matched as the fit score matches them), most asked first. What to learn (or add to the CV, if it's true) next."""
     import json
     from collections import Counter
     from ruamel.yaml import YAML
+    from jobgambit.core import apply
     from jobgambit.core.data import home
-    master, count = source_text().lower(), Counter()
+    p = pf.profile().model_dump()
+    k, count = apply.known(p), Counter()
     for d in (home() / "applications").glob("*/"):
-        fit, job = d / "fit.json", d / "job.yaml"  # job.yaml: applications imported from the original pipeline
+        text = next((f.read_text(encoding="utf-8", errors="replace") for f in (d / "posting.md", d / "job_description.md") if f.is_file()), "")
+        fit, job = d / "fit.json", d / "job.yaml"  # no posting kept: the keyword list of an older application
         try:
-            kws = (json.loads(fit.read_text(encoding="utf-8")) if fit.exists()
-                   else YAML(typ="safe").load(job.read_text(encoding="utf-8")) if job.exists() else {}).get("keywords") or []
+            text = text or "\n".join(map(str, (json.loads(fit.read_text(encoding="utf-8")) if fit.exists() else YAML(typ="safe").load(
+                job.read_text(encoding="utf-8")) if job.exists() else {}).get("keywords") or []))
         except Exception:
             continue
-        count.update({k.lower() for k in coverage(master, [str(k) for k in kws])[1]})
+        count.update({t["name"] for t in apply.keywords(text, p, k=k) if not t["have"]})
     return count.most_common(n)
 
 
@@ -166,9 +176,10 @@ def filled(pdf) -> float:
     return max(0.0, min(1.0, (top - low) / area)) if area > 0 else 1.0
 
 
-def check(text: str, posting: str = "", keywords=(), pdf=None, max_pages: int = 0, fill: float = 0) -> dict:
-    """{"fails": [...], "warns": [...], "coverage": [hit, missing]}. Any fail blocks the document. fill: a one-page
-    document (the letter) must cover at least this share of its page."""
+def check(text: str, posting: str = "", pdf=None, max_pages: int = 0, fill: float = 0) -> dict:
+    """{"fails": [...], "warns": [...]}. Any fail blocks the document. posting: only for the letter (facts about the
+    employer); a CV's numbers and tools must be in the profile. fill: a one-page document (the letter) must cover at
+    least this share of its page."""
     fails, warns = [], []
     if pdf:
         from pypdf import PdfReader
@@ -190,14 +201,13 @@ def check(text: str, posting: str = "", keywords=(), pdf=None, max_pages: int = 
         fails.append("banned phrases: " + ", ".join(bad))
     if secret_shaped(text):  # an AI with tools, tricked by a posting, could copy one from this computer into a line
         fails.append("looks like a password, key or token: don't send this, and change that line")
-    src = source_text(posting)
+    src, where = source_text(posting), "your profile or the posting" if posting else "your profile"
     invented, unknown = fact_check(text, src)
     if invented:
-        fails.append("numbers not in your profile or the posting: " + ", ".join(invented))
+        fails.append(f"numbers not in {where}: " + ", ".join(invented))
     if unknown:
-        warns.append("tool names not in your profile or the posting: " + ", ".join(unknown))
+        warns.append(f"tool names not in {where}: " + ", ".join(unknown))
     reach = adoption_claims(text, src)
     if reach:
         warns.append("reach claims your profile doesn't make: " + ", ".join(reach))
-    hit, miss = coverage(text, keywords)
-    return {"fails": fails, "warns": warns, "coverage": [hit, miss]}
+    return {"fails": fails, "warns": warns}

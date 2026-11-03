@@ -194,9 +194,10 @@
               <label for="s-instr"><span class="set-t" x-text="t('settings.instructions')"></span><span class="set-d" x-text="t('settings.instructions_d')"></span></label>
               <textarea id="s-instr" rows="3" x-model="p.instructions" @change="save('instructions')" :placeholder="t('settings.instructions_hint')"></textarea>
             </div>
-            <div class="set wide">
-              <span class="set-t" x-text="t('settings.style')"></span><span class="set-d" x-text="t('settings.style_d')"></span>
-              <a href="#profile/writing" @click.prevent="$store.app.show('profile', 'writing')" x-text="t('profile.edit_letter')"></a>
+            <div class="set">
+              <div><div class="set-t" x-text="t('settings.style')"></div><div class="set-d" x-text="t('settings.style_d')"></div></div>
+              <div class="ctl"><button class="btn" @click="$store.app.show('profile', 'writing')">
+                <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg><span x-text="t('settings.style_go')"></span></button></div>
             </div>
           </div>
         </template>
@@ -263,7 +264,8 @@
             </div>
             <div class="set">
               <label for="s-applang"><span class="set-t" x-text="t('settings.app_language')"></span><span class="set-d" x-text="t('settings.app_language_d')"></span></label>
-              <select id="s-applang" x-model="p.app_language" @change="save('app_language')"><option value="en">English</option></select>
+              <select id="s-applang" x-model="p.app_language" @change="save('app_language').then(ok => ok && location.reload())">
+                <option value="en">English</option><option value="de">Deutsch</option></select>
             </div>
           </div>
         </template>

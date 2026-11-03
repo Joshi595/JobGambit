@@ -10,6 +10,8 @@ from jobgambit.app.apply_api import guard
 from jobgambit.core import ai, apply, mail, prompts, secrets
 from jobgambit.core import profile as pf
 from jobgambit.core.data import db, home
+
+REFUSED = re.compile(r"application-specific|app password|AUTHENTICATIONFAILED|invalid credentials|authentication failed|\b535\b", re.I)
 from jobgambit.core.profile import Model
 
 router = APIRouter(prefix="/api")
@@ -46,6 +48,9 @@ async def test_email():
     try:
         return {"result": await guard(mail.test)}
     except Exception as e:
+        if REFUSED.search(str(e)):  # Gmail: "[ALERT] Application-specific password required" for a normal password
+            raise HTTPException(422, "Your email provider refused the password. Follow the steps above: most providers need an app "
+                                     "password made for JobGambit, not your normal password.")
         raise HTTPException(422, f"Couldn't connect: {e}. Check the address, the servers and the app password.")
 
 

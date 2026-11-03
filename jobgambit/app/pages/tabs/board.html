@@ -65,7 +65,7 @@
   </div>
 
   <div class="chips" x-show="section === 'less'" role="group" :aria-label="t('board.reason_label')">
-    <template x-for="r in ['', 'weak', 'type', 'excluded', 'offtopic']" :key="r">
+    <template x-for="r in ['', 'weak', 'type', 'excluded', 'old', 'duplicate', 'offtopic']" :key="r">
       <button class="chip" :aria-pressed="reason === r" @click="reason = r; limit = 100" x-text="t('board.reason.' + (r || 'all'))"></button>
     </template>
   </div>
@@ -104,6 +104,7 @@
             <span class="badge" x-show="j.deadline" :class="soon(j.deadline) && 'warn'" x-text="closes(j.deadline)"></span>
             <span class="badge accent" x-show="j.applied_before" x-text="t('board.applied_before', {n: j.applied_before})"></span>
             <span class="badge" x-show="j.applicants" :title="t('board.applicants_d')" x-text="j.applicants?.text"></span>
+            <span class="badge accent" x-show="j.ai" :title="j.ai?.why" x-text="t('board.ai', {n: j.ai?.score})"></span>
             <span class="badge" x-show="j.status === 'paused'" x-text="t('board.paused')"></span>
             <template x-for="w in warns(j)" :key="w"><span class="badge warn" x-text="w"></span></template>
             <span x-text="whyText(j)"></span>

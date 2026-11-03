@@ -8,7 +8,7 @@ import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 
-from jobgambit.core.sources import get_json, http, job, web
+from jobgambit.core.sources import get_json, http, job, plain, web
 
 AA = {"X-API-Key": "jobboerse-jobsuche", "accept": "application/json"}  # the public client key arbeitsagentur.de itself uses
 
@@ -122,6 +122,8 @@ def karriere_nrw(name, ref, ctx):
     return [job(r.get("title"), r.get("authority") or name, r.get("location") or "", f"https://karriere.nrw/stellenausschreibung/{r.get('uuid')}",
                 "karriere.nrw", r.get("published"), country="DE")
             for r in get_json(ref)["items"] if r.get("jobtype") == "joboffer"]
+
+
 
 
 RESEARCH_WORDS = ["wissenschaftlicher Mitarbeiter", "Doktorand", "PhD", "Postdoc", "Promotionsstelle"]

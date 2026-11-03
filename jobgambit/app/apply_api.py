@@ -22,8 +22,8 @@ async def guard(fn, *args, **kw):
     from starlette.concurrency import run_in_threadpool
     try:
         return await run_in_threadpool(fn, *args, **kw)
-    except ai.UsageLimit as e:
-        raise HTTPException(429, f"Your AI plan's usage limit is reached. Try again after it resets. ({e})")
+    except ai.UsageLimit as e:  # its message says what to do
+        raise HTTPException(429, str(e))
     except ai.AIError as e:
         raise HTTPException(502, str(e))
 
@@ -295,11 +295,11 @@ def apply_folder(key: str):
 
 @router.put("/apply/{key}/choices")
 async def choices(key: str, request: Request):
-    """The review cards' choices so far, saved as the person clicks (picked up again after leaving the page)."""
+    """The review cards' choices so far, saved as the person clicks (picked up again after leaving the page); the
+    keyword bar they make comes back (Python's coverage, so the Review and the Documents check agree)."""
     if not posting.get(key):
         raise HTTPException(404)
-    apply.dump(key, "choices", (await request.json())["choices"])
-    return {"ok": True}
+    return {"ok": True, "terms": apply.save_choices(key, (await request.json())["choices"])}
 
 
 @router.post("/applications/{app_id}/folder")

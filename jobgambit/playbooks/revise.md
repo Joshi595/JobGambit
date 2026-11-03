@@ -1,4 +1,4 @@
-The person reviewed their tailored CV and letter and asked for changes. Rewrite only the cards below, following their comments exactly, using only the facts. Letter paragraphs stay short: the whole letter must still fit one page (at most 350 words).
+The person reviewed their tailored CV and letter and asked for changes. Rewrite only the cards below, following their comments exactly, using only the facts. The whole letter stays {words} words in {paragraphs} paragraphs ({fit}).
 
 FACTS:
 {factsheet}

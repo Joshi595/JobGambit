@@ -19,6 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from jobgambit.app import apply_api, jobs_api, mail_api, practice_api, settings_api, setup_api
 from jobgambit.app.jobs_api import OPEN
 from jobgambit.core import ai, data, system
+from jobgambit.core import profile as pf
 
 HERE = Path(__file__).parent
 TOKEN = secrets.token_urlsafe(24)  # new every start; only our own page knows it
@@ -39,6 +40,23 @@ app.include_router(jobs_api.router)
 app.include_router(settings_api.router)
 app.include_router(mail_api.router)
 app.include_router(practice_api.router)
+
+
+@app.exception_handler(Exception)
+async def unexpected(request: Request, e: Exception):
+    """Anything that goes wrong unexpectedly: a message the page can show, and the details in <data>/app.log (which
+    Help's problem report includes)."""
+    import traceback
+    try:
+        log = data.home() / "app.log"
+        mode = "w" if log.exists() and log.stat().st_size > 1_000_000 else "a"  # starts over past 1 MB
+        with open(log, mode, encoding="utf-8") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {request.method} {request.url.path}\n"
+                    f"{''.join(traceback.format_exception(e))}\n")
+    except OSError:
+        pass
+    return JSONResponse({"detail": f"Something went wrong ({type(e).__name__}: {str(e)[:300]}). Try again; if that happens "
+                                   "again, copy a problem report in Help and open an issue with it."}, status_code=500)
 
 
 @app.middleware("http")
@@ -150,7 +168,9 @@ ELSEWHERE = ('<!doctype html><html lang="en"><meta charset="utf-8"><title>JobGam
 def index(k: str = ""):
     if not secrets.compare_digest(k.encode(), launch_code().encode()):
         return HTMLResponse(ELSEWHERE, status_code=403)
-    page = (HERE / "pages" / "index.html").read_text(encoding="utf-8").replace("{{TOKEN}}", TOKEN)
+    lang = pf.Preferences.model_validate(pf.read("preferences")).app_language
+    lang = lang if (HERE / "i18n" / f"{lang}.json").is_file() else "en"  # app.js loads its texts by <html lang>
+    page = (HERE / "pages" / "index.html").read_text(encoding="utf-8").replace("{{TOKEN}}", TOKEN).replace('lang="en"', f'lang="{lang}"', 1)
     return page.replace('.js"></script>', f'.js?v={STAMP}"></script>').replace('href="/static/app.css"', f'href="/static/app.css?v={STAMP}"')
 
 
@@ -181,8 +201,10 @@ def ai_test(name: str):
         raise HTTPException(404)
     try:
         ai.answer("Reply with ok set to true.", Ping, ai.AGENTS[name], timeout=180)
+        ai.remember_test(name, True)
         return {"ok": True}
     except ai.AIError as e:
+        ai.remember_test(name, False)
         return {"ok": False, "error": str(e)}
 
 
@@ -220,10 +242,10 @@ def update():
 
 def upkeep(after: str = ""):
     """At app start and after every scheduled run: alerts that didn't arrive go out again, the scheduled tasks are put
-    back if missing, and a stale email check runs now (after the daily search it also says so: the computer is on, so
-    the hourly task should have run)."""
-    from jobgambit.core import alerts, mail, scheduler
-    for step in (alerts.flush, scheduler.ensure, lambda: mail.watchdog(loud=after == "search")):
+    back if missing, a stale email check runs now (after the daily search it also says so: the computer is on, so
+    the hourly task should have run), and postings scored by an older formula are scored again (once)."""
+    from jobgambit.core import alerts, mail, scheduler, search
+    for step in (alerts.flush, scheduler.ensure, lambda: mail.watchdog(loud=after == "search"), search.migrate):
         try:
             step()
         except Exception:
@@ -231,10 +253,12 @@ def upkeep(after: str = ""):
 
 
 def watchdog():
-    """Stop when no page has pinged for a while: closing the browser tab ends the app."""
+    """Stop when no page has pinged for a while: closing the browser tab ends the app, though never in the middle of a
+    full re-judge of the stored postings (0.17's first one was cut off that way, 2026-10-31)."""
+    from jobgambit.core import search
     while SERVER and not SERVER.should_exit:
         time.sleep(15)
-        if last_ping and time.time() - last_ping > IDLE_EXIT:
+        if last_ping and time.time() - last_ping > IDLE_EXIT and not search.BUSY.is_set():
             SERVER.should_exit = True
 
 

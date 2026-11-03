@@ -60,4 +60,6 @@ case "$choice" in
 esac
 
 echo "\nDone. Starting JobGambit...\n"
+# Where the AI installers above put their programs (this shell's PATH is from before): JobGambit finds them at once
+export PATH="$HOME/.local/bin:$(npm prefix -g 2>/dev/null || echo /usr/local)/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 "$APP" >/dev/null 2>&1 &

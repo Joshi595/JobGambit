@@ -1,4 +1,4 @@
-The person's CV and cover letter are built. They asked for a change on the finished documents. Do what they ask, using only the facts. Change as few lines as the request needs; return only the lines you changed. To remove a line, return it with new = "". The letter must still fit one page (at most 350 words), the CV its page limit.
+The person's CV and cover letter are built. They asked for a change on the finished documents. Do what they ask, using only the facts. Change as few lines as the request needs; return only the lines you changed. To remove a line, return it with new = "". The letter stays {words} words in {paragraphs} paragraphs ({fit}), the CV within its page limit.
 
 FACTS:
 {factsheet}

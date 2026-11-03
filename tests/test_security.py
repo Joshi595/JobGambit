@@ -50,6 +50,22 @@ def test_problem_report_hides_who_you_are(home):
         assert private not in text
 
 
+def test_an_unexpected_error_is_a_message_and_lands_in_the_problem_report(home, monkeypatch):
+    """No bare "Internal Server Error": any error becomes a message the page shows, its details go to app.log, and
+    the problem report carries them with the last AI errors."""
+    from jobgambit.app import server
+    from jobgambit.core import ai
+    c = TestClient(server.app, base_url="http://127.0.0.1", headers={"x-token": server.TOKEN}, raise_server_exceptions=False)
+    with monkeypatch.context() as m:
+        m.setattr(pf, "read", lambda kind: (_ for _ in ()).throw(PermissionError("master_cv.yaml is open in another program")))
+        r = c.get("/api/state")
+    assert r.status_code == 500 and "PermissionError: master_cv.yaml is open in another program" in r.json()["detail"]
+    assert "Traceback" in (home / "app.log").read_text(encoding="utf-8")
+    ai.record("Profile", "", "claude", "", 1.0, "Invalid API key - Please run /login")
+    text = client().get("/api/problem-report").json()["text"]
+    assert "claude Profile: Invalid API key" in text and "master_cv.yaml is open in another program" in text
+
+
 def test_practice_ids_are_numbers(home):
     c = client()
     assert c.get("/api/practice/abc").status_code == 404
@@ -113,21 +129,24 @@ def test_documents_with_secret_shaped_text_are_blocked(home):
 
 
 def test_ai_answer_runs_start_in_an_empty_folder(monkeypatch, tmp_path):
-    """An answer run never starts inside the app's or the person's folders, so relative paths find nothing."""
+    """An answer run never starts inside the app's or the person's folders, so relative paths find nothing. A file given
+    to the run (a scanned CV) is the only thing in it."""
     import os
-    import subprocess
+    import sys
     from jobgambit.core import ai
-    seen = {}
-
-    def fake_run(args, **kw):
-        seen["cwd"] = kw.get("cwd")
-        return subprocess.CompletedProcess(args, 0, stdout='{"structured_output": {"ok": true}}', stderr="")
-    monkeypatch.setattr(ai.subprocess, "run", fake_run)
     monkeypatch.setenv("JOBGAMBIT_HOME", str(tmp_path))
-    agent = ai.Antigravity()
-    monkeypatch.setattr(agent, "path", lambda: "agy")
-    assert agent.run("p", {"type": "object"}) == {"ok": True}
-    assert seen["cwd"] and seen["cwd"] != os.getcwd() and not os.path.exists(seen["cwd"])  # gone afterwards, was empty
+
+    class Looks(ai.Agent):  # says where it started and what it found there
+        name = label = "looks"
+
+        def path(self):
+            return sys.executable
+
+        def command(self, schema, step="", folder=""):
+            return ["-c", "import json, os; print(json.dumps({'cwd': os.getcwd(), 'files': sorted(os.listdir())}))"]
+    seen = Looks().run("p", {"type": "object"})
+    assert seen["files"] == [] and seen["cwd"] != os.getcwd() and not os.path.exists(seen["cwd"])  # gone afterwards
+    assert Looks().run("p", {"type": "object"}, files={"cv.png": b"\x89PNG"})["files"] == ["cv.png"]
 
 
 def test_a_stepstone_answer_from_a_private_address_is_dropped(monkeypatch):

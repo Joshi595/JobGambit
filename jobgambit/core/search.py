@@ -3,10 +3,12 @@ dedupe, score, store, fetch missing descriptions, re-check open postings. Ported
 
 Run from the app (Board → Search now), from the daily schedule (`jobgambit search`), or tests.
 """
+import contextlib
 import html
 import importlib
 import itertools
 import json
+import os
 import re
 import threading
 import time
@@ -15,14 +17,15 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from babel import Locale
-from rapidfuzz import fuzz
 
-from jobgambit.core import countries, posting, score, sites, sources
+from jobgambit.core import countries, posting, score, sites, skillmap, sources
 from jobgambit.core import profile as pf
 from jobgambit.core.data import db, home
 
 STATUS = {"running": False, "log": [], "summary": ""}  # what the Board shows while a search runs
 LOCK = threading.Lock()
+RESCORE = threading.RLock()  # one full re-judge (and skill-map AI run) at a time: upkeep, a search and a settings change
+BUSY = threading.Event()  # a full re-judge is running: the app doesn't stop itself meanwhile (server.watchdog)
 QUERIES_PER_BOARD = {"linkedin": 3}  # LinkedIn rate-limits bursts; the rest rotates through more
 DEFAULT_QUERIES = 6
 MAX_LOOKBACK = 30  # days a search looks back at most: a word searched again after N days looks back N + 1 (up to this)
@@ -176,8 +179,12 @@ def run(only: str = "") -> str:
 
 
 def _run(only):
+    migrate()
     prefs = pf.Preferences.model_validate(pf.read("preferences")).model_dump()
     profile = pf.profile().model_dump()
+    skillmap.ensure(profile, prefs)  # what the postings are matched on, made again if what it's made from changed
+    if skillmap.STATE["error"]:
+        say(f"Skill map not made: {skillmap.STATE['error']}")
     matcher = score.Matcher(prefs, profile)
     state, today = load_state(), date.today().isoformat()
     tasks = []  # (source name, country, fn, query or None, ctx)
@@ -329,8 +336,8 @@ def after_search(prefs):
         except Exception as e:  # a bonus
             say(f"Applicant numbers skipped: {e}")
     with db() as con:
-        top = con.execute("select title, company, score from jobs where status='new' and first_seen=? and score >= 60 "
-                          "order by score desc limit 5", (date.today().isoformat(),)).fetchall()
+        top = con.execute("select title, company, score from jobs where status='new' and first_seen=? and score >= ? "
+                          "order by score desc limit 5", (date.today().isoformat(), score.BANDS["strong"])).fetchall()
     if top:
         from jobgambit.core import alerts
         try:
@@ -345,6 +352,32 @@ def off_status(why_off):
     return "expired" if why_off == "expired" else "filtered" if why_off else ""
 
 
+NOT_A_BRAND = {"the", "die", "der", "das", "ing", "technische", "universitat", "university", "universitatsklinikum", "hochschule",
+               "institut", "institute", "deutsches", "deutsche", "stadt", "landeshauptstadt", "klinikum", "niederlassung"}
+
+
+def brand(company: str) -> str:
+    """The word a company's name starts with once legal forms are left out ("volkswagen" for Volkswagen Group (CARIAD)),
+    '' when that word is generic or short: TU München, Hochschule München, Institut für A and Universität Hamburg have
+    none (their next word is a city or a field, which two different employers share)."""
+    words = sources.slug(re.sub(sources.LEGAL, " ", company or "", flags=re.I), 60).split("-")
+    first = words[0] if words else ""
+    return first if len(first) > 2 and first not in NOT_A_BRAND else ""
+
+
+def same_company(a: dict, b: dict) -> bool:
+    """One employer under two names: one name inside the other, or the same brand word in the same city (Volkswagen
+    Group, Volkswagen Group (CARIAD) and Volkswagen Algérie, all in Wolfsburg). A staffing firm's branches in two
+    cities stay two."""
+    ca, cb = a.get("company") or "", b.get("company") or ""
+    words = lambda c: set(sources.slug(re.sub(sources.LEGAL, " ", c, flags=re.I), 60).split("-")) - {""}
+    wa, wb = words(ca), words(cb)
+    if wa and wb and (wa <= wb or wb <= wa):  # every word of one name in the other: Bosch / Robert Bosch GmbH
+        return True                          # (not TU München / Hochschule München, as a letter match had it)
+    here, there = score.place(a.get("location")), score.place(b.get("location"))
+    return bool(brand(ca)) and brand(ca) == brand(cb) and (not here or not there or here[:2] == there[:2])
+
+
 DROPPED = []  # titles the last store() filtered, with why
 
 
@@ -352,13 +385,12 @@ def store(found, matcher):
     """New postings only (by key, link, or a near-identical title at the same company). Returns (kept, filtered).
     A career-site posting that matches a board posting is not stored twice: it becomes that row's site_url."""
     with db() as con:
-        rows = con.execute("select key, url, company, title, source from jobs").fetchall()
+        rows = con.execute("select key, url, company, title, source, location from jobs").fetchall()
         known_urls, source = {r["url"] for r in rows}, {r["key"]: r["source"] for r in rows}
-        by_title = {}  # one job, several boards: near-identical title and a company name that contains the other
+        by_title = {}  # one job, several boards: near-identical title at one employer (same_company)
         for r in rows:
-            by_title.setdefault(sources.slug(sources.clean_title(r["title"]), 60), []).append((r["company"] or "", r["key"]))
-        twin = lambda j: next((k for c, k in by_title.get(sources.slug(j["title"], 60), [])
-                               if fuzz.partial_ratio(j["company"].lower(), c.lower()) >= 85), None)
+            by_title.setdefault(sources.slug(sources.clean_title(r["title"]), 60), []).append(dict(r))
+        twin = lambda j: next((r["key"] for r in by_title.get(sources.slug(j["title"], 60), []) if same_company(j, r)), None)
         new, site_url = {}, {}
         for j in found:
             if not j.get("url") or not j.get("title") or j["url"] in known_urls:
@@ -370,7 +402,7 @@ def store(found, matcher):
                 if same in new and j.get("desc") and not new[same].get("desc"):
                     new[same]["desc"] = j["desc"]
                 continue
-            by_title.setdefault(sources.slug(j["title"], 60), []).append((j["company"], j["key"]))
+            by_title.setdefault(sources.slug(j["title"], 60), []).append(j)
             new[j["key"]] = j
         sims = {}
         for k, u in site_url.items():
@@ -410,19 +442,19 @@ def by_host(rows):
     return [r for turn in itertools.zip_longest(*hosts.values()) for r in turn if r]
 
 
-def enrich(matcher, limit=40):
+def enrich(matcher):
     """Fetch the descriptions of every open posting that came without one (LinkedIn, university lists…), and of every
     one from the last 14 days filtered on its title alone, and judge them again from their text: one whose text fits
-    goes to the Board, saying so. Also re-checks open postings older than 3 days: one that was taken down is marked expired.
-    A site that says "too many requests" (429) is left alone for the rest of the run."""
-    due, recent = (date.today() - timedelta(days=3)).isoformat(), (date.today() - timedelta(days=14)).isoformat()
+    goes to the Board, saying so. Also re-checks every open posting not checked for a week: one that was taken down is
+    marked expired. A site that says "too many requests" (429) is left alone for the rest of the run."""
+    due, recent = (date.today() - timedelta(days=7)).isoformat(), (date.today() - timedelta(days=14)).isoformat()
     has_text = lambda r: (home() / "jobs" / "desc" / f"{r['key']}.txt").exists()
     with db() as con:
         rows = [dict(r) for r in con.execute("select * from jobs where status in ('new', 'shortlisted') order by score desc")]
         titled = [dict(r) for r in con.execute("select * from jobs where status='filtered' and (why like '[junk]%' or why like '[weak]%') "
                                                "and first_seen >= ? order by first_seen desc, key", (recent,))]
     todo = by_host([r for r in rows if not has_text(r)] + [r for r in titled if not has_text(r)])
-    stale = [r for r in rows if r["first_seen"] <= due and json.loads(r["data"] or "{}").get("checked", r["first_seen"]) <= due][:limit]
+    stale = [r for r in rows if r["first_seen"] <= due and json.loads(r["data"] or "{}").get("checked", r["first_seen"]) <= due]
     busy = set()  # sites that answered 429
 
     def fetch(r):
@@ -480,21 +512,58 @@ def enrich(matcher, limit=40):
 
 
 def rescore() -> int:
-    """After the person changed what they look for: every open posting judged again (score, type, reason, status), so
-    the Board's tabs and Less relevant follow at once. Starred postings and ones moved to the board by hand stay where
-    they are. Returns how many changed status."""
+    with RESCORE, busy():
+        return _rescore()
+
+
+@contextlib.contextmanager
+def busy():
+    BUSY.set()
+    try:
+        yield
+    finally:
+        BUSY.clear()
+
+
+def _rescore() -> int:
+    """After the person changed what they look for (or their CV): every open posting judged again (score, type,
+    reason, status), so the Board's tabs and Less relevant follow at once. The skill map is made again first if what it
+    is made from changed. One posting found twice at two names of one employer shows once. Starred postings and ones
+    moved to the board by hand stay where they are. Returns how many changed status."""
     prefs = pf.Preferences.model_validate(pf.read("preferences")).model_dump()
-    matcher, changed, rows = score.Matcher(prefs, pf.profile().model_dump()), 0, []
-    with db() as con:
-        jobs = [dict(r) for r in con.execute("select * from jobs where status in ('new', 'filtered', 'shortlisted')")]
+    profile = pf.profile().model_dump()
+    skillmap.ensure(profile, prefs)
+    matcher = score.Matcher(prefs, profile)
+
+    def open_jobs():
+        with db() as con:
+            return [dict(r) for r in con.execute("select * from jobs where status in ('new', 'filtered', 'shortlisted')")]
+
+    jobs = open_jobs()
     path = lambda k: home() / "jobs" / "desc" / f"{k}.txt"
     text = {r["key"]: path(r["key"]).read_text(encoding="utf-8") if path(r["key"]).exists() else "" for r in jobs}
     sims = {}
+    changed = _write(jobs, text, sims, matcher)
+    return changed
+
+
+def _write(jobs: list[dict], text: dict, sims: dict, matcher) -> int:
+    """Every posting judged, then written in one short write (the app stays usable meanwhile). Returns how many moved."""
+    changed, rows = 0, []
+    judged = []
     for r in jobs:  # judged first, written after in one short write: the app stays usable meanwhile
         fields, why_off = matcher.assess({**r, "company": r["company"] or "", "location": r["location"] or ""},
-                                         text[r["key"]], sims.get(r["key"]))
+                                         text.get(r["key"], ""), sims.get(r["key"]))
         kept = r["status"] == "shortlisted" or (json.loads(r["data"] or "{}").get("kept") and why_off != "expired")
+        judged.append((r, fields, why_off, kept))
+    shown = {}  # title -> postings on the Board: a twin at another name of the same employer goes under Less relevant
+    for r, fields, why_off, kept in sorted(judged, key=lambda x: (not x[3], -x[1]["score"], x[0]["first_seen"] or "")):
+        same = sources.slug(sources.clean_title(r["title"]), 60)
+        if not kept and not why_off and any(same_company(r, o) for o in shown.get(same, [])):
+            why_off = "duplicate"
         status = r["status"] if kept else off_status(why_off) or "new"
+        if status in ("new", "shortlisted"):
+            shown.setdefault(same, []).append(r)
         changed += status != r["status"]
         rows.append((fields["score"], (f"[{why_off}] " if why_off else "") + fields["why"], fields["type"], status, r["key"], r["status"]))
     with db() as con:  # a posting the person moved meanwhile (applying, skipped) keeps its new status
@@ -509,17 +578,82 @@ def refresh(search_too: bool):
         run()
 
 
+def migrate() -> int:
+    """Scores from an older formula (score.VERSION): every stored posting judged again, once (rescore() makes the skill
+    map first). Returns how many moved."""
+    with RESCORE, busy():  # a second caller in this process waits, then finds it done
+        if load_state().get("score_version") == score.VERSION:
+            return 0
+        lock = home() / "jobs" / "migrate.lock"
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        if not claim(lock):
+            return 0  # another process (the app, or a scheduled task) is on it
+        try:
+            normal_priority()
+            moved = _rescore()
+            state = load_state()
+            state["score_version"] = score.VERSION
+            save_state(state)
+            return moved
+        finally:
+            lock.unlink(missing_ok=True)
+
+
+def claim(path) -> bool:
+    """A lock file across processes: True when this one may go on (no other living process holds it)."""
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            pid = int(path.read_text(encoding="utf-8") or 0)
+        except (OSError, ValueError):
+            pid = 0
+        if pid and alive(pid):
+            return False
+        path.unlink(missing_ok=True)  # left by a process that ended
+        return claim(path)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(str(os.getpid()))
+    return True
+
+
+def alive(pid: int) -> bool:
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    import ctypes  # os.kill(pid, 0) would end the process on Windows
+    k = ctypes.windll.kernel32
+    h = k.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not h:
+        return False
+    code = ctypes.c_ulong()
+    k.GetExitCodeProcess(h, ctypes.byref(code))
+    k.CloseHandle(h)
+    return code.value == 259  # STILL_ACTIVE
+
+
+def normal_priority():
+    """A scheduled task runs below normal, and Windows 11 then gives it about a tenth of a core: 0.17's first re-judge
+    took hours that way (2026-10-31). The migration asks for normal priority."""
+    if os.name == "nt":
+        import ctypes
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x20)  # NORMAL_PRIORITY_CLASS
+
+
 def health() -> dict:
     return load_state().get("health", {})
 
 
 def applicant_numbers(limit: int = 10) -> int:
-    """How many applied, for the best new LinkedIn matches of today (score 40+), 3 s apart; stops at LinkedIn's first
-    429 (sources.applicants). Stored as data.applicants for the Board. Returns how many were found."""
+    """How many applied, for the best new LinkedIn matches of today (a good fit or better), 3 s apart; stops at
+    LinkedIn's first 429 (sources.applicants). Stored as data.applicants for the Board. Returns how many were found."""
     with db() as con:
-        rows = con.execute("select key, url, data from jobs where status in ('new', 'shortlisted') and score >= 40 and "
+        rows = con.execute("select key, url, data from jobs where status in ('new', 'shortlisted') and score >= ? and "
                            "url like '%linkedin.com/jobs/view/%' and first_seen=? order by score desc limit ?",
-                           (date.today().isoformat(), limit)).fetchall()
+                           (score.BANDS["good"], date.today().isoformat(), limit)).fetchall()
     found = 0
     for r in rows:
         got = sources.applicants(r["url"])
@@ -571,7 +705,8 @@ def second_look(limit: int = 400) -> int:
 
 
 def rank(n: int = 20) -> int:
-    """One AI answer run re-scores the n best new postings from their texts. Returns how many were ranked."""
+    """One AI answer run judges the n best new postings from their texts: its score and why are kept next to JobGambit's
+    own (data.ai, a badge on the Board), which the next rescore would otherwise overwrite. Returns how many were ranked."""
     from jobgambit.core import ai, apply, prompts
     from jobgambit.core.profile import Model
 
@@ -599,5 +734,6 @@ def rank(n: int = 20) -> int:
     with db() as con:
         for r in out.ranking:
             if r.key in keys:
-                con.execute("update jobs set score=?, why=? where key=?", (max(0, min(100, r.score)), "AI: " + r.why, r.key))
+                con.execute("update jobs set data=json_set(coalesce(data, '{}'), '$.ai', json(?)) where key=?",
+                            (json.dumps({"score": max(0, min(100, r.score)), "why": " ".join(r.why.split())[:200]}), r.key))
     return len(out.ranking)

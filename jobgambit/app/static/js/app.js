@@ -1,8 +1,10 @@
 // Shared helpers and the tab switcher. Each tab is an HTML file in /tabs/, its logic in a static/js file.
 window.TOKEN = document.querySelector('meta[name="cp-token"]').content;  // a meta tag: the page allows no inline scripts
 window.T = {};
+let EN = {};  // a text not translated yet shows in English
 window.t = (key, vars = {}) => {
-  let s = key.split(".").reduce((o, k) => o?.[k], T) ?? key;
+  const find = o => key.split(".").reduce((o, k) => o?.[k], o);
+  let s = find(T) ?? find(EN) ?? key;
   for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, v);
   return s;
 };
@@ -15,9 +17,26 @@ window.api = async (path, opts = {}) => {
   if (r.status === 403 && (await r.clone().json().catch(() => ({}))).error === "forbidden") { location.reload(); return new Promise(() => {}); }
   const isJson = (r.headers.get("content-type") || "").includes("json");
   const data = isJson ? await r.json() : await r.blob();
-  if (!r.ok) throw new Error((isJson && (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data.error))) || r.statusText);
+  if (!r.ok) throw new Error((isJson ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data.error))
+                                     : (await data.text()).slice(0, 300)) || t("error_status", { n: r.status }));
   return data;
 };
+
+// Help's Test and setup's "Test my AI": one tiny AI run -> "✓ works" or "✗ failed: what it said"
+window.aiTest = async name => {
+  try {
+    const r = await api(`/api/ai/test/${name}`, { method: "POST" });
+    return r.ok ? "✓ " + t("health.works") : "✗ " + t("health.failed") + ": " + r.error;
+  } catch (e) { return "✗ " + t("health.failed") + ": " + e.message; }
+};
+
+// A file dropped anywhere but an upload area (data-drop) would open in the tab in place of the app
+for (const type of ["dragover", "drop"])
+  addEventListener(type, e => {
+    if (!e.dataTransfer?.types.includes("Files") || e.target.closest?.("[data-drop]")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "none";
+  });
 
 // "2026-10-18" or a full timestamp -> the reader's own date format
 window.fmtDate = d => {
@@ -33,10 +52,12 @@ window.download = (blob, name) => {
 };
 
 const MAIN_TABS = ["board", "needs", "applications", "practice", "profile", "designs", "settings", "help"];
-const NAV = [{ id: "find", tabs: ["board", "needs", "applications", "practice"] }, { id: "you", tabs: ["profile", "designs"] },
+const NAV = [{ id: "find", tabs: ["board", "needs", "applications", "practice"] }, { id: "you", tabs: ["profile", "writing", "designs"] },
              { id: "end", tabs: ["settings", "help"] }];
+const LINKS = { writing: ["profile", "writing"] };  // sidebar entries that open a part of a tab
+const writingOpen = s => s.tab === "profile" && ["writing", "letter"].includes(s.sub);
 window.ICONS = { board: "layout-list", needs: "bell", applications: "briefcase", practice: "message-square", profile: "user",
-                 designs: "palette", settings: "settings", help: "life-buoy", setup: "sparkles" };
+                 writing: "pencil", designs: "palette", settings: "settings", help: "life-buoy", setup: "sparkles" };
 const parts = {};  // x-include cache: file -> Promise<html>
 window.feature = name => !!Alpine.store("app").state?.features?.[name];  // features this computer has switched on
 
@@ -46,10 +67,15 @@ document.addEventListener("alpine:init", () => {
     setupMode() { return this.state && !this.state.preferences.setup_done; },
     tabs() { return this.setupMode() ? ["setup", "help"] : MAIN_TABS; },
     groups() { return this.setupMode() ? [{ id: "setup", tabs: ["setup"] }, { id: "end", tabs: ["help"] }] : NAV; },
-    on(k) { return this.tab === k || (k === "board" && this.tab === "apply"); },  // Apply belongs to the Board
+    on(k) {  // Apply belongs to the Board; Profile › Writing lights Writing, not Profile
+      if (k === "writing") return writingOpen(this);
+      if (k === "profile") return this.tab === "profile" && !writingOpen(this);
+      return this.tab === k || (k === "board" && this.tab === "apply");
+    },
     async refresh() { this.state = await api("/api/state"); },
     async counts() { try { this.n = await api("/api/counts"); } catch {} },
     async show(tab, sub = "") {
+      if (LINKS[tab]) [tab, sub] = LINKS[tab];
       if (this.dirty && !confirm(t("unsaved"))) return;
       this.dirty = false;
       this.tab = tab;
@@ -161,11 +187,12 @@ document.addEventListener("alpine:init", () => {
     async init() { this.err = ""; try { this.h = await api("/api/health"); } catch (e) { this.err = e.message; } },
     async test(name) {
       this.results[name] = t("health.testing");
-      try { const r = await api(`/api/ai/test/${name}`, { method: "POST" });
-            this.results[name] = r.ok ? "✓ " + t("health.works") : "✗ " + t("health.failed") + ": " + r.error; }
-      catch (e) { this.results[name] = "✗ " + t("health.failed") + ": " + e.message; }
+      this.results[name] = await aiTest(name);
     },
-    signIn(name) { api(`/api/ai/sign-in/${name}`, { method: "POST" }); },
+    async signIn(name) {
+      try { await api(`/api/ai/sign-in/${name}`, { method: "POST" }); this.results[name] = t("health.sign_in_opened"); }
+      catch (e) { this.results[name] = "✗ " + e.message; }
+    },
     openFolder() { api("/api/open-folder", { method: "POST" }); },
     async backup() { download(await api("/api/backup"), "jobgambit-backup.zip"); },
     async update() {
@@ -189,9 +216,10 @@ addEventListener("beforeunload", e => { if (window.Alpine && Alpine.store("app")
 
 // Texts first, then Alpine: labels are rendered once, so they must exist when Alpine starts. Alpine also waits for
 // DOMContentLoaded: every page script must have registered its alpine:init (stores like "saved") before Alpine runs.
-const strings = fetch("/i18n/en.json", { cache: "no-cache" }).then(r => r.json());
+const strings = Promise.all([...new Set(["en", document.documentElement.lang])]
+  .map(l => fetch(`/i18n/${l}.json`, { cache: "no-cache" }).then(r => r.json())));
 document.addEventListener("DOMContentLoaded", async () => {
-  T = await strings;
+  [EN, T = EN] = await strings;
   document.head.append(Object.assign(document.createElement("script"), { src: "/static/vendor/alpine.min.js" }));
 });
 

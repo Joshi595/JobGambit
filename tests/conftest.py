@@ -12,6 +12,17 @@ def no_background_thumbs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def nothing_runs_by_itself(monkeypatch):
+    """The skill map is made by the person's AI app (their plan's tokens), and a CV or settings change re-judges the
+    postings 20 s later in a thread: tests never start either by themselves (a thread outliving its test would run in
+    whatever JOBGAMBIT_HOME is set next). A test that wants them patches them back."""
+    from jobgambit.app import settings_api
+    from jobgambit.core import ai, skillmap
+    monkeypatch.setattr(skillmap, "ask", lambda prompt, agent: (_ for _ in ()).throw(ai.AIError("no AI app in tests")))
+    monkeypatch.setattr(settings_api, "refresh_later", lambda *a, **k: None)
+
+
+@pytest.fixture(autouse=True)
 def own_home(tmp_path, monkeypatch):
     """Every test gets its own data folder: nothing (e.g. the AI ledger) ever lands in the person's real one."""
     monkeypatch.setenv("JOBGAMBIT_HOME", str(tmp_path))

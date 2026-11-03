@@ -5,27 +5,76 @@ from pathlib import Path
 
 from babel import Locale
 from fastapi import APIRouter, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
-from jobgambit.core import ai, alerts, apply, cvimport, mail, prompts, render, secrets
+from jobgambit.core import ai, alerts, apply, cvimport, mail, prompts, render, score, secrets, skillmap
 from jobgambit.core import profile as pf
 
 router = APIRouter(prefix="/api")
 EXAMPLES = Path(__file__).parent.parent / "examples"
 NOT_COUNTRIES = {"EU", "EZ", "UN", "QO", "XA", "XB", "ZZ"}
 SIGN_IN = {"claude": ["claude"], "codex": ["codex", "login"], "antigravity": ["agy"]}
+MAX_UPLOAD = 15 * 1024 * 1024  # a CV file is rarely over 2 MB
+SCAN = ("\n\nThis CV has no text in it (a scan or a photo): it is the file {name} in the current folder. Read that file and "
+        "take every fact from it.")
 
 
 def agent():
     return ai.chosen(pf.read("preferences").get("agent", ""))
 
 
-async def run_ai(prompt, model, timeout=600):
-    """The AI call runs in a worker thread so the app stays responsive."""
-    from starlette.concurrency import run_in_threadpool
+async def run_ai(prompt, model, timeout=600, files=None):
+    """The AI call runs in a worker thread so the app stays responsive. files: {name: bytes} for the AI to read itself
+    (a scanned CV), its prompt then names them."""
+    if files:
+        prompt += "".join(SCAN.format(name=n) for n in files)
     try:
-        return (await run_in_threadpool(ai.answer, prompt, model, agent(), timeout)).model_dump()
+        return (await run_in_threadpool(ai.answer, prompt, model, agent(), timeout, files=files)).model_dump()
     except ai.AIError as e:
         raise HTTPException(502, str(e))
+
+
+async def upload(request: Request) -> bytes:
+    """An uploaded file's bytes, at most MAX_UPLOAD."""
+    big = HTTPException(413, "This file is over 15 MB. Save a smaller copy (PDF or Word), or paste the text of your CV below.")
+    if int(request.headers.get("content-length") or 0) > MAX_UPLOAD:
+        raise big
+    data = await request.body()
+    if len(data) > MAX_UPLOAD:
+        raise big
+    return data
+
+
+async def cv_file(data: bytes) -> tuple[str, dict]:
+    """A CV file -> (its text, {}), or for a scan or photo the chosen AI can read itself: ("", {file name: bytes}).
+    Anything else: a 422 that says what to do instead (the page opens its paste box)."""
+    try:
+        text = await run_in_threadpool(cvimport.cv_text, data)
+    except cvimport.Unreadable as e:
+        raise HTTPException(422, str(e))
+    if cvimport.enough(text):
+        return text, {}
+    ext = cvimport.kind(data)
+    if ext not in cvimport.PICTURES | {".pdf"}:
+        raise HTTPException(422, "There is too little text in this file for a CV. Try the PDF or Word version." + cvimport.PASTE)
+    try:
+        a = agent()
+    except ai.AIError as e:
+        raise HTTPException(502, str(e))
+    if ext not in a.reads:
+        raise HTTPException(422, f"This file is a scan or a photo, with no text in it, and {a.label} can't read those here "
+                                 "(Claude can). Upload a PDF or Word file with text instead." + cvimport.PASTE)
+    return "", {"cv" + ext: data}
+
+
+NOTHING = "No name, job or education could be read from this file. Try the PDF or Word version of your CV." + cvimport.PASTE
+
+
+def found(profile: dict, nothing: str = NOTHING) -> dict:
+    """An import with no name, no job and no education in it read nothing usable (garbled text, the wrong file)."""
+    if not (profile["basics"]["name"].strip() or profile["experience"] or profile["education"]):
+        raise HTTPException(422, nothing)
+    return profile
 
 
 @router.get("/state")
@@ -33,8 +82,8 @@ def state():
     prefs = pf.Preferences.model_validate(pf.read("preferences")).model_dump()
     countries = {k: v for k, v in Locale("en").territories.items() if len(k) == 2 and k.isalpha() and k not in NOT_COUNTRIES}
     return {"profile": pf.profile().model_dump(), "preferences": prefs, "answers": pf.read("answers"),
-            "style": pf.read("style"), "lessons": pf.read("lessons"), "letter": pf.read("letter"), "cv_rules": pf.read("cv_rules"), "default_cv_rules": prompts.load("default_cv_rules"), "default_style": prompts.load("default_style"), "agents": ai.installed(),
-            "countries": dict(sorted(countries.items(), key=lambda kv: kv[1])),
+            "style": pf.read("style"), "lessons": pf.read("lessons"), "letter": pf.read("letter"), "cv_rules": pf.read("cv_rules"), "default_cv_rules": prompts.load("default_cv_rules"), "default_style": prompts.load("default_style"), "agents": ai.installed(), "tested": ai.tested(),
+            "countries": dict(sorted(countries.items(), key=lambda kv: kv[1])), "bands": score.BANDS,
             "examples": sorted(p.name for p in EXAMPLES.iterdir() if p.is_dir()), "features": features()}
 
 
@@ -54,7 +103,38 @@ async def save(kind: str, request: Request):
         raise HTTPException(422, str(e))
     if kind in ("profile", "preferences"):  # what the thumbnails show (preferences: the target country)
         render.warm_thumbs()
+    if kind == "profile" and pf.read("preferences").get("setup_done"):  # what the CV has changes every fit score
+        from jobgambit.app import settings_api
+        settings_api.refresh_later(False)
     return {"ok": True}
+
+
+@router.get("/skillmap")
+def skill_map():
+    """Profile › Your CV: the skills JobGambit matches postings on, and which of them the person has."""
+    return {"concepts": skillmap.shown(), "made": skillmap.read().get("made", ""), "error": skillmap.STATE["error"]}
+
+
+@router.put("/skillmap/{cid}")
+async def flip_skill(cid: str, request: Request):
+    """{have: 1 | 0 | null}: the person's own say on one skill (null: as the CV shows)."""
+    value = (await request.json()).get("have")
+    if not skillmap.flip(cid, None if value is None else float(bool(value))):
+        raise HTTPException(404, "That skill isn't in the map any more. Reload the page.")
+    from jobgambit.app import settings_api
+    settings_api.refresh_later(False)
+    return {"ok": True}
+
+
+@router.post("/skillmap/rebuild")
+async def rebuild_skill_map():
+    """The map made again now (one AI run, economy level), merged with what's there."""
+    await run_in_threadpool(skillmap.ensure, None, None, True)
+    if skillmap.STATE["error"]:
+        raise HTTPException(502, skillmap.STATE["error"])
+    from jobgambit.app import settings_api
+    settings_api.refresh_later(False)
+    return skill_map()
 
 
 @router.get("/answers/suggested")
@@ -94,28 +174,30 @@ async def patch_answers(request: Request):
 
 @router.post("/import")
 async def import_file(request: Request, name: str):
-    """Raw file body. ZIP = LinkedIn data export, JSON = JSON Resume, anything else = a CV file for the AI."""
-    data = await request.body()
-    low = name.lower()
-    if low.endswith(".zip"):
-        draft = cvimport.from_linkedin(data)
-    elif low.endswith(".json"):
-        draft = cvimport.from_json_resume(data)
-    else:
-        text = cvimport.cv_text(data, name)
-        if len(text.split()) < 30:
-            raise HTTPException(422, "No readable text in this file (it may be a scan). "
-                                     "Try the Word version, or paste the text of your CV instead.")
-        return {"profile": await run_ai(prompts.build("import_cv", cv=text), pf.Profile)}
-    return {"profile": pf.Profile.model_validate(draft).model_dump()}
+    """Raw file body. A ZIP = LinkedIn data export, .json = JSON Resume (both mapped without AI), anything else = a CV
+    file for the AI."""
+    data = await upload(request)
+    linkedin, resume = cvimport.kind(data) == ".zip", name.lower().endswith(".json")
+    if linkedin or resume:
+        try:
+            draft = await run_in_threadpool(cvimport.from_linkedin if linkedin else cvimport.from_json_resume, data)
+            draft = pf.Profile.model_validate(draft).model_dump()
+        except cvimport.Unreadable as e:
+            raise HTTPException(422, str(e))
+        except (ValueError, AttributeError, TypeError, KeyError):  # broken JSON, or parts of the wrong kind
+            raise HTTPException(422, str(cvimport.Unreadable("linkedin" if linkedin else "json")))
+        return {"profile": found(draft)}
+    text, files = await cv_file(data)
+    return {"profile": found(await run_ai(prompts.build("import_cv", cv=text), pf.Profile, files=files))}
 
 
 @router.post("/import-text")
 async def import_text(request: Request):
     text = (await request.json()).get("text", "")
-    if len(text.split()) < 30:
+    if not cvimport.enough(text):
         raise HTTPException(422, "That is too short for a CV. Paste the whole text.")
-    return {"profile": await run_ai(prompts.build("import_cv", cv=text), pf.Profile)}
+    return {"profile": found(await run_ai(prompts.build("import_cv", cv=text), pf.Profile),
+                             "No name, job or education could be read from this text. Paste your whole CV, with your name and jobs.")}
 
 
 class Gap(pf.Model):
@@ -148,9 +230,9 @@ async def gaps(request: Request):
     return await run_ai(prompts.build("gaps", profile=json.dumps(profile, ensure_ascii=False)[:20000]), Gaps)
 
 
-async def merge(kind: str, info: str, profile: dict | None) -> dict:
+async def merge(kind: str, info: str, profile: dict | None, files=None) -> dict:
     old = profile or pf.profile().model_dump()
-    out = await run_ai(prompts.build("merge", profile=json.dumps(old, ensure_ascii=False), kind=kind, info=info), Merged, 900)
+    out = await run_ai(prompts.build("merge", profile=json.dumps(old, ensure_ascii=False), kind=kind, info=info), Merged, 900, files)
     new = pf.keep_existing(old, out["profile"])
     return {"profile": pf.Profile.model_validate(new).model_dump(), "changes": out["changes"]}
 
@@ -165,12 +247,10 @@ async def merge_text(request: Request):
 
 
 @router.post("/profile/merge-file")
-async def merge_file(request: Request, name: str):
+async def merge_file(request: Request):
     """A newer CV file -> an updated draft of the existing profile (nothing already there is lost)."""
-    text = cvimport.cv_text(await request.body(), name)
-    if len(text.split()) < 30:
-        raise HTTPException(422, "No readable text in this file. Try the Word version, or paste the text.")
-    return await merge("a newer CV", text, None)
+    text, files = await cv_file(await upload(request))
+    return await merge("a newer CV", text, None, files)
 
 
 @router.post("/example/{name}")
@@ -227,12 +307,13 @@ async def suggest_openings(request: Request):
 
 
 @router.post("/extract-text")
-async def extract_text(request: Request, name: str):
+async def extract_text(request: Request):
     """A letter the person wrote (PDF, Word, text) -> its text, as a writing sample."""
+    data = await upload(request)
     try:
-        text = cvimport.cv_text(await request.body(), name)
-    except Exception:  # not a PDF/DOCX after all, or a damaged file
-        text = ""
+        text = await run_in_threadpool(cvimport.cv_text, data)
+    except cvimport.Unreadable as e:
+        raise HTTPException(422, str(e).replace(cvimport.PASTE, " Or paste the text."))
     if not text.strip():
         raise HTTPException(422, "No readable text in this file. Try the Word version, or paste the text.")
     return {"text": text}
@@ -276,5 +357,9 @@ def sign_in(name: str):
     if not a or not a.path():
         raise HTTPException(404, "not installed")
     from jobgambit.core.system import open_terminal
-    open_terminal([a.path(), *SIGN_IN[name][1:]])
+    cmd = [a.path(), *SIGN_IN[name][1:]]
+    try:
+        open_terminal(cmd)
+    except OSError as e:  # no terminal app found (a minimal Linux desktop)
+        raise HTTPException(500, f"Couldn't open a terminal window ({e}). Open one yourself and run: {' '.join(cmd)}")
     return {"ok": True}

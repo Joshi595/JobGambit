@@ -306,6 +306,18 @@ def test_a_hiring_team_with_a_hyphen_is_no_job_advert(home, monkeypatch):
         assert con.execute("select status from applications where id=1").fetchone()[0] == "rejected"
 
 
+def test_the_ai_unsays_an_interview_phrase_in_a_job_alert(home, monkeypatch):
+    """A Nokia job alert ("we also invite you to chat with a Nokia employee") landed in Needs you as an interview: the AI
+    read it as nothing to do, but the phrase won. Now the AI's read wins and the alert is skipped like any other."""
+    monkeypatch.setattr("jobgambit.core.alerts.push", lambda *a, **k: True)
+    monkeypatch.setattr(mail, "triage", lambda m, cands: {"signal": None, "app_id": 0, "when": "",
+                                                          "summary": "Nokia job alert; no application action required."})
+    items = checked(monkeypatch, [{**mail_("NokiaME DoNotReply <donotreply@nokia.example>", "New Nokia career opportunities at Nokia",
+                                           "New openings: Junior C++ Software Engineer. We also invite you to chat with a "
+                                           "Nokia employee to discover more about our everyday life."), "id": "<al@x>"}])
+    assert "<al@x>" not in items
+
+
 def test_a_rejection_is_never_skipped_for_a_word_in_the_job_title(home, monkeypatch):
     """Another dropped rejection: "Dose Verification" in the title hit the skip word for "verify your email"."""
     monkeypatch.setattr("jobgambit.core.alerts.push", lambda *a, **k: True)
@@ -626,3 +638,16 @@ def test_person_says_which_application(home):
     assert row["status"] == "interview" and data["interview_at"] == "2099-01-05T09:30"
     assert data["threads"] == ["th9"] and data["refs"] == ["77123"]
     assert c.put("/api/applications/9", json={"interview_at": "javascript:x"}).status_code == 422
+
+
+def test_a_normal_password_gets_the_app_password_advice(home, monkeypatch):
+    """Gmail refuses a normal Google password with an IMAP alert: the person is told to make an app password."""
+    from fastapi.testclient import TestClient
+    from jobgambit.app import server
+    c = TestClient(server.app, base_url="http://127.0.0.1", headers={"x-token": server.TOKEN})
+
+    def refuse():
+        raise Exception("b'[ALERT] Application-specific password required: https://support.google.com/accounts/answer/185833 (Failure)'")
+    monkeypatch.setattr(mail, "test", refuse)
+    r = c.post("/api/email/test")
+    assert r.status_code == 422 and "app password made for JobGambit" in r.json()["detail"]

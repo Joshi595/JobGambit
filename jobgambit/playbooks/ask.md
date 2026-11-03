@@ -37,7 +37,8 @@ Return:
 Rules:
 - job_types are from: full_time, part_time, student, internship, thesis, apprenticeship, graduate, phd, freelance.
 - A wish about the language of the CV and letters ("in English") goes to doc_language (an ISO 639-1 code, or "match" for the
-  posting's language), not into the instructions.
+  posting's language), not into the instructions. A wish about how long letters are ("shorter letters", "a full page") goes
+  to letter_length (full | short), never into the letter instructions.
 - search_time is "HH:MM" in 24 hours, "" = off. theme: auto | light | dark. remote: any | remote | hybrid | onsite.
 - Hiding a company goes to avoid_companies; hiding a kind of job by a word in its title goes to exclude_words.
 - Places, titles and company names are written as the person wrote them.

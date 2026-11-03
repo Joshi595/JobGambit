@@ -25,7 +25,7 @@ JUDGED = {"job_types", "side_types", "titles", "keywords", "targets", "places", 
           "prefer_companies", "weights", "thesis_level", "mandatory_internship"}
 SEARCHED = {"job_types", "side_types", "titles", "keywords", "targets", "thesis_level", "mandatory_internship"}
 _refresh = None
-WRITING = {"doc_language", "design", "review_depth", "instructions"}  # what the writing box (Profile › Writing) may change
+WRITING = {"doc_language", "design", "review_depth", "instructions", "letter_length"}  # what the writing box (Profile › Writing) may change
 
 
 def refresh_later(search_too: bool, wait: float = 20):

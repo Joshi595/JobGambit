@@ -12,13 +12,13 @@ const FINISH_LINKS = { details: ["profile", "details"], style: ["profile", "writ
 document.addEventListener("alpine:init", () => {
   Alpine.data("setup", () => ({
     STEPS, REQUIRED, JOB_TYPES, STUDENT_TYPES, PERMITS,
-    step: 1, phase: "upload", st: null, prefs: null, loadErr: "", busy: "", err: "", agentNames: [],
-    text: "", draft: null, questions: [], replies: {}, changes: [],               // 2 CV
+    step: 1, phase: "upload", st: null, prefs: null, loadErr: "", busy: "", secs: 0, err: "", agentNames: [],
+    text: "", draft: null, questions: [], replies: {}, changes: [], drag: false, pasteOpen: false, testNote: "",  // 2 CV
     me: null, links: [], photoV: 0,                                             // 3 about you
     graduation: "",                                                             // 1 what they look for
     titles: "", keywords: [], pick: "", aiTitles: "",                                         // 4 looking for
     docsLater: false,                                                           // 5 details + documents
-    cvRules: "", styleWay: "", samples: "", tone: "neutral", length: "standard", openings: [], opening: -1, styleText: "",  // 6 writing
+    cvRules: "", styleText: "", letterLength: "full",                          // 6 writing (its AI helpers: writingHelpers)
     daily: true, time: "09:00",                                                 // 10 autopilot
     async init() {
       const app = Alpine.store("app");
@@ -28,6 +28,7 @@ document.addEventListener("alpine:init", () => {
       this.graduation = this.st.answers?.["Expected graduation"] || "";
       this.cvRules = this.st.cv_rules || this.st.default_cv_rules || "";  // sensible defaults to start from, CV and letter alike
       this.styleText = this.st.style || this.st.default_style || "";
+      this.letterLength = this.prefs.letter_length;
       this.agentNames = Object.keys(this.st.agents).filter(k => this.st.agents[k]);
       if (this.agentNames.length && !this.agentNames.includes(this.prefs.agent)) this.setAgent(this.agentNames[0]);
       this.phase = app.setupPhase || "upload";  // back from Profile's "Fix something" review: the questions come next
@@ -52,9 +53,11 @@ document.addEventListener("alpine:init", () => {
       if (n === 4) this.fillLooking();
     },
     country(code) { return this.st.countries[code] || code; },
-    async run(label, fn) {
-      this.busy = label; this.err = "";
+    async run(label, fn) {  // the seconds count up while it works: a CV can take a minute or two
+      this.busy = label; this.err = ""; this.secs = 0;
+      const tick = setInterval(() => this.secs++, 1000);
       try { await fn(); } catch (e) { this.err = e.message; }
+      clearInterval(tick);
       this.busy = "";
     },
 
@@ -88,17 +91,28 @@ document.addEventListener("alpine:init", () => {
     },
 
     // ---- 2 Your CV
-    setAgent(a) { this.prefs.agent = a; patchPrefs({ agent: a }); },
-    async recheck() {
-      this.st.agents = (await api("/api/state")).agents;
-      this.agentNames = Object.keys(this.st.agents).filter(k => this.st.agents[k]);
-      if (this.agentNames.length && !this.agentNames.includes(this.prefs.agent)) this.setAgent(this.agentNames[0]);
+    setAgent(a) { this.prefs.agent = a; this.testNote = ""; patchPrefs({ agent: a }); },
+    beta(a) { return a === "antigravity" && !this.st.tested?.[a]; },  // until Help's (or this page's) Test passed once
+    async testAI() {
+      const name = this.agentNames.includes(this.prefs.agent) ? this.prefs.agent : this.agentNames[0];
+      this.testNote = t("health.testing");
+      this.testNote = await aiTest(name);
+      if (this.testNote.startsWith("✓")) this.st.tested = { ...this.st.tested, [name]: true };
     },
-    upload(ev) {
-      const f = ev.target.files[0];
-      ev.target.value = "";
-      if (f) this.run(t("setup.reading"), async () => {
-        this.draft = (await api(`/api/import?name=${encodeURIComponent(f.name)}`, { body: f })).profile;
+    recheck() {
+      return this.run(t("working"), async () => {
+        const st = await api("/api/state");
+        Object.assign(this.st, { agents: st.agents, tested: st.tested });
+        this.agentNames = Object.keys(this.st.agents).filter(k => this.st.agents[k]);
+        if (!this.agentNames.length) throw new Error(t("setup.ai_still_none"));
+        if (!this.agentNames.includes(this.prefs.agent)) this.setAgent(this.agentNames[0]);
+      });
+    },
+    pick(ev) { const f = ev.target.files[0]; ev.target.value = ""; this.upload(f); },
+    upload(f) {  // chosen or dropped; when it can't be read, the paste box opens under the message
+      if (f && !this.busy) this.run(t("setup.reading"), async () => {
+        try { this.draft = (await api(`/api/import?name=${encodeURIComponent(f.name)}`, { body: f })).profile; }
+        catch (e) { this.pasteOpen = true; throw e; }
         this.phase = "summary";
       });
     },
@@ -196,7 +210,7 @@ document.addEventListener("alpine:init", () => {
         this.keywords = Object.entries(r.keywords).map(([lang, w]) => ({ lang, words: w.join(", ") }));
       });
     },
-    lang(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code); } catch { return code; } },
+    lang(code) { try { return new Intl.DisplayNames([document.documentElement.lang], { type: "language" }).of(code); } catch { return code; } },
     addTarget() {
       if (this.pick && !this.prefs.targets.some(c => c.code === this.pick)) this.prefs.targets.push({ code: this.pick, permit: "", needs_sponsorship: false });
       this.pick = "";
@@ -227,35 +241,11 @@ document.addEventListener("alpine:init", () => {
     },
     addRule(field, line) { this[field] = addRuleLine(this[field], line); },
 
-    // ---- 6 Cover-letter style: learned from their letters, or from the opening they pick
-    letters(ev) {
-      const files = [...ev.target.files];
-      ev.target.value = "";
-      this.run(t("setup.style.reading"), async () => {
-        for (const f of files) {
-          const r = await api(`/api/extract-text?name=${encodeURIComponent(f.name)}`, { body: f });
-          if (!this.samples.trim() && !this.st.letter) {  // the first letter also becomes Profile › Cover letter
-            await api("/api/data/letter", { method: "PUT", json: { text: r.text.trim() } });
-            this.st.letter = r.text.trim();
-          }
-          this.samples = [this.samples.trim(), r.text.trim()].filter(Boolean).join("\n\n---\n\n");
-        }
-      });
-    },
-    getOpenings() {
-      return this.run(t("setup.style.writing"), async () => {
-        this.openings = (await api("/api/suggest/openings", { json: { tone: this.tone, length: t("setup.length_" + this.length) } })).openings;
-        this.opening = -1;
-      });
-    },
-    makeStyle() {
-      const o = this.openings[this.opening];
-      const [answers, sample] = this.styleWay === "own"
-        ? [{ source: "letters they wrote themselves" }, this.samples.slice(0, 15000)]
-        : [{ tone: this.tone, length: t("setup.length_" + this.length), opening_they_picked: o.style }, o.text];
-      return this.run(t("setup.style.making"), async () => {
-        this.styleText = (await api("/api/suggest/style", { json: { answers, sample } })).markdown;
-      });
+    // ---- 6 CV and letter instructions; writingHelpers (parts/writing_helpers.html) fills them in with AI
+    async keepLetter(text) {  // the first letter they upload there also becomes Profile › Writing › Your letter
+      if (this.st.letter) return;
+      await api("/api/data/letter", { method: "PUT", json: { text } });
+      this.st.letter = text;
     },
     styleDone() {  // CV instructions (or the defaults) and letter instructions (learned, kept, or the defaults)
       return this.run(t("working"), async () => {

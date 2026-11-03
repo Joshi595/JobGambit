@@ -35,8 +35,7 @@ career_sites:
   - {name: Fraunhofer, kind: successfactors, ref: "https://jobs.fraunhofer.de"}
   - {name: DLR, kind: successfactors, ref: "https://jobs.dlr.de"}
   - {name: karriere.nrw (RWTH and NRW universities), kind: karriere_nrw, ref: "https://api.karriere.nrw/v1.0/search/"}
-  - {name: TUM (academic staff), kind: page, ref: 'https://portal.mytum.de/jobs/wissenschaftler/#re:/NewsArticle_'}
-  - {name: TUM (student jobs), kind: page, ref: 'https://portal.mytum.de/schwarzesbrett/hiwi_stellen/#re:/NewsArticle_', types: [student]}
+  # TUM: portal.mytum.de (robots.txt bars all of it, campus network only) is not read.
   - {name: TU Berlin, kind: page, ref: 'https://www.jobs.tu-berlin.de/stellenausschreibungen#re:/stellenausschreibungen/\d+'}
   - {name: TU Dresden, kind: page, ref: 'https://tu-dresden.de/tu-dresden/arbeiten-an-der-tud/stellenangebote/stellenangebote#re:StellAus/stelle\.asp'}
   - {name: FAU Erlangen-Nürnberg, kind: page, ref: 'https://www.jobs.fau.de/jobs/#re:/jobs/[^/]+-fau-\d+'}

@@ -7,6 +7,7 @@ import io
 import re
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from babel import Locale
 
@@ -38,7 +39,7 @@ class Basics(Model):
 class Bullet(Model):
     id: str
     text: str = Field(description="One achievement or duty. **bold** allowed. Facts only, as the person wrote them.")
-    tags: list[str] = Field(default_factory=list, description="Short lowercase skill/topic tags")
+    tags: list[str] = Field(default_factory=list, description="Not used any more: leave empty")  # kept so older CV files still load
 
 
 class Entry(Model):
@@ -90,7 +91,7 @@ class Profile(Model):
     experience: list[Entry] = Field(default_factory=list)
     projects: list[Entry] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
-    skills: dict[str, list[str]] = Field(default_factory=dict, description="Category -> skills")
+    skills: dict[str, list[str]] = Field(default_factory=dict, description="Skills by category")
     languages: list[Language] = Field(default_factory=list)
     certifications: list[Item] = Field(default_factory=list)
     awards: list[Item] = Field(default_factory=list)
@@ -113,12 +114,12 @@ class Preferences(Model):
     app_language: str = "en"
     agent: str = ""
     titles: list[str] = Field(default_factory=list, description="Job titles to search for")
-    keywords: dict[str, list[str]] = Field(default_factory=dict, description="Language code -> search words")
+    keywords: dict[str, list[str]] = Field(default_factory=dict, description="Search words by language code")
     job_types: list[str] = Field(default_factory=lambda: ["full_time"])
     side_types: list[str] = Field(default_factory=list, description="Chosen job types marked \"Also\": searched half as often")
     places: list[str] = Field(default_factory=list)
     radius_km: int = 50
-    remote: str = Field("any", description="any | remote | hybrid | onsite")
+    remote: str = Field("any", description="any, remote, hybrid or onsite")
     salary: str = ""
     start: str = ""
     notice: str = ""
@@ -127,12 +128,13 @@ class Preferences(Model):
     hours: str = Field("", description="Hours per week the person can work during the semester (working student)")
     mandatory_internship: bool = Field(False, description="The internship must be a mandatory one (Pflichtpraktikum) in their studies")
     internship_months: str = Field("", description="How many months an internship can last")
-    thesis_level: str = Field("", description="bachelor | master, for thesis postings")
+    thesis_level: str = Field("", description="bachelor or master, for thesis postings")
     doc_language: str = Field("match", description="'match' = the posting's language, or an ISO 639-1 code")
-    review_depth: str = Field("all", description="all | big | none")
+    review_depth: str = Field("all", description="all, big or none")
     design: str = "classic"
-    instructions: str = Field("", description="The person's own instructions, added to every AI run")
-    cost_level: str = Field("standard", description="economy | standard | premium")
+    instructions: str = Field("", description="The person's note, added to every AI step that writes for them (letters, CVs, forms, follow-ups, interview answers)")
+    letter_length: Literal["full", "short"] = Field("full", description="full: one full page, 450-500 words in 5 paragraphs; short: 300-350 words in 4")
+    cost_level: str = Field("standard", description="economy, standard or premium")
     search_time: str = Field("", description="HH:MM for the daily search, empty = off")
     ai_ranking: bool = Field(False, description="Let the AI re-rank the day's best postings after a search")
     ai_mail: bool = Field(True, description="Let the AI read application mails the rules can't sort (at most 10 per check)")
@@ -142,7 +144,7 @@ class Preferences(Model):
     alert_events: list[str] = Field(default_factory=lambda: ["matches", "interview", "assessment", "offer", "reply", "digest"])
     alert_email: bool = Field(False, description="Also send alerts by email to the person's own address")
     desktop_alerts: bool = Field(True, description="Interview, test, offer and action-needed alerts also show on this computer")
-    theme: str = Field("auto", description="auto | light | dark")
+    theme: str = Field("auto", description="auto, light or dark")
     email: dict = Field(default_factory=dict, description="address, provider (gmail, outlook…) or imap/smtp/port; the password is in the password store")
     follow_up_days: int = 10
     sources_off: list[str] = Field(default_factory=list, description="Job sources the person switched off")
@@ -163,9 +165,11 @@ class Style(Model):
     markdown: str
 
 
-FILES = {"profile": "master_cv.yaml", "preferences": "preferences.yaml", "answers": "answers.yaml", "companies": "companies.yaml", "designs": "designs.yaml"}
-TEXTS = {"style": "style.md", "lessons": "lessons.md", "letter": "letter.md", "cv_rules": "cv_rules.md"}
-# style: letter instructions; letter: the person's own cover letter; cv_rules: CV instructions (all in Profile › Writing)
+FILES = {"profile": "master_cv.yaml", "preferences": "preferences.yaml", "answers": "answers.yaml", "companies": "companies.yaml", "designs": "designs.yaml",
+         "skill_map": "skill_map.yaml"}  # skill_map: what postings are matched on (core/skillmap.py)
+TEXTS = {"style": "style.md", "lessons": "lessons.md", "letter": "letter.md", "cv_rules": "cv_rules.md", "stories": "stories.md"}
+# style: letter instructions; letter: the person's own cover letter; cv_rules: CV instructions (all in Profile › Writing);
+# stories: their own STAR stories (optional, written by hand), a source for the letter's one personal detail
 
 
 
@@ -201,7 +205,9 @@ def read(kind: str):
     data = _plain(_yaml().load(path)) if path.exists() else {}
     if kind == "preferences":  # a setting a later version removed (fit_threshold, upload_folder) must not stop an older file loading
         data = {k: v for k, v in data.items() if k in Preferences.model_fields}
-    return data
+        if "letter_length" not in data and "short" in read("style").lower()[:400]:  # before the setting: "short" near the top
+            data["letter_length"] = "short"                                         # of the letter instructions (kept on the next save)
+    return mend(data) if kind == "profile" else data
 
 
 def write(kind: str, value):
@@ -211,6 +217,8 @@ def write(kind: str, value):
     model = {"profile": Profile, "preferences": Preferences}.get(kind)
     if model:
         value = model.model_validate(value).model_dump()
+    if kind == "profile":
+        value = mend(value)
     path = folder() / FILES[kind]
     y = _yaml()
     old = y.load(path) if path.exists() else CommentedMap()
@@ -221,6 +229,49 @@ def write(kind: str, value):
 
 def profile() -> Profile:
     return Profile.model_validate(read("profile"))
+
+
+def mend(p: dict) -> dict:
+    """Two old faults, put right whenever the CV is read or saved: skills the Profile editor cut at a comma inside
+    brackets, and two items with one id (an AI import), which a save would fold into one."""
+    if isinstance(p.get("skills"), dict):
+        p["skills"] = {cat: _whole(items) if isinstance(items, list) else items for cat, items in p["skills"].items()}
+    _unique_ids(p, set())
+    return p
+
+
+def _whole(items: list) -> list:
+    """["Reinforcement Learning (PPO", "SAC", "Gymnasium)"] -> ["Reinforcement Learning (PPO, SAC, Gymnasium)"]. Pieces
+    are joined only up to the one that closes the bracket; a bracket that never closes leaves the items as they are."""
+    depth = lambda s: str(s).count("(") + str(s).count("[") - str(s).count(")") - str(s).count("]")
+    out, i = [], 0
+    while i < len(items):
+        j, d = i, depth(items[i])
+        while d > 0 and j + 1 < len(items):
+            j += 1
+            d += depth(items[j])
+        if d == 0 and j > i:
+            out.append(", ".join(map(str, items[i:j + 1])))
+            i = j + 1
+        else:
+            out.append(items[i])
+            i += 1
+    return out
+
+
+def _unique_ids(node, seen: set):
+    """The second item with an id already used anywhere in the CV gets one of its own (exp1 -> exp1_2)."""
+    if isinstance(node, dict):
+        for v in node.values():
+            _unique_ids(v, seen)
+    elif isinstance(node, list):
+        for x in node:
+            if isinstance(x, dict) and isinstance(x.get("id"), str) and x["id"]:
+                base, n = x["id"], 2
+                while x["id"] in seen:
+                    x["id"], n = f"{base}_{n}", n + 1
+                seen.add(x["id"])
+            _unique_ids(x, seen)
 
 
 DEGREE_RANK = [(3, r"\bph\.? ?d|doctor|dr\.|promotion"), (2, r"master|\bm\.? ?sc|\bm\.? ?a\b|m\.? ?eng|mba|diplom|magister|staatsexamen"),

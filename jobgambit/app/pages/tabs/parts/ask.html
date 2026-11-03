@@ -1,6 +1,8 @@
 <!-- Ask JobGambit: one sentence -> proposed changes to settings, CV/letter instructions, application details and the
-     CV itself. Nothing is saved until Apply; each area can be left out. (Settings and Profile show this part.) -->
-<section class="panel ask" x-data="askBox" :aria-label="t('ask.title')">
+     CV itself. Nothing is saved until Apply; each area can be left out. (Settings and Profile show this part.)
+     The writing box also asks what the writing helpers' quick questions send it (the ask-writing event). -->
+<section class="panel ask" x-data="askBox" :aria-label="t('ask.title')"
+         @ask-writing.window="if (writing) { q = $event.detail; $el.scrollIntoView({ block: 'nearest' }); ask(); }">
   <form class="inline" @submit.prevent="ask()">
     <label class="sr-only" :for="writing ? 'ask-w' : 'ask-box'" x-text="t('ask.label')"></label>
     <svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-sparkles"/></svg>

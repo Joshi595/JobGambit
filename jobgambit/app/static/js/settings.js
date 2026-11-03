@@ -32,7 +32,7 @@ document.addEventListener("alpine:init", () => {
 
   Alpine.data("settings", () => ({
     GROUPS, JOB_TYPES, LISTS: { prefer: "prefer_companies", avoid: "avoid_companies", exclude: "exclude_words" },
-    st: null, p: null, err: "", pick: "", keywords: [], dropped: [], style: "", lessons: "", sources: [], health: {}, coverage: {}, aiTest: "", confirm: "",
+    st: null, p: null, err: "", pick: "", keywords: [], dropped: [], sources: [], health: {}, coverage: {}, aiTest: "", confirm: "",
     newWords: null, wordsTimer: 0, wordsBusy: false,
 
     async init() { await this.load(); },
@@ -43,7 +43,6 @@ document.addEventListener("alpine:init", () => {
         this.coverage = cov;
         this.st = st; this.p = st.preferences;
         this.keywords = Object.entries(this.p.keywords).map(([lang, w]) => ({ lang, words: w.join(", ") }));
-        this.style = st.style || st.default_style; this.lessons = st.lessons;
         this.sources = src.sources; this.health = s.health; this.dropped = s.dropped || [];
       } catch (e) { this.err = t("settings.load_failed") + " " + e.message; }
     },
@@ -98,10 +97,6 @@ document.addEventListener("alpine:init", () => {
       return c ? last + " · " + t(c.gap ? "settings.coverage_gap" : "settings.coverage", { n: c.queries, d: c.cycle, back: c.lookback }) : last;
     },
     coverageOf(s) { return Object.values(this.coverage).map(x => x[s]).find(Boolean); },
-    async saveText(kind) {
-      try { await api(`/api/data/${kind}`, { method: "PUT", json: { text: this[kind] } }); Alpine.store("saved").ping(); }
-      catch (e) { Alpine.store("toast").show(e.message, "bad"); }
-    },
     async testAI() {
       this.aiTest = t("settings.testing");
       try {

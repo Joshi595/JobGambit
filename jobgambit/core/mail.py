@@ -536,7 +536,7 @@ TRIAGE_MAX = 10  # AI reads per check: a busy inbox after two weeks away doesn't
 
 
 class Triage(pf.Model):
-    signal: str = pf.Field(description="interview | assessment | offer | action | rejected | acknowledgement | other")
+    signal: str = pf.Field(description="interview, assessment, offer, action, rejected, acknowledgement or other")
     app_id: int = pf.Field(description="the id of the application the mail is about, from the list; 0 when none fits or unsure")
     when: str = pf.Field(description='the appointment it sets, as "YYYY-MM-DDTHH:MM" (the mail\'s own time), or ""')
     summary: str = pf.Field(description="what the mail says or asks the person, in at most 20 words")
@@ -635,6 +635,10 @@ def _one(m: dict, rows: list[dict], address: str, out: dict):
         t = triage(m, [row] if row else cands)
         if t:
             summary, at = t["summary"], t["when"]
+            if signal in ("interview", "assessment") and t["signal"] not in ("interview", "assessment"):
+                signal = t["signal"]  # the AI read it: "we invite you to chat with an employee" in a job alert is no interview
+                if SKIP.search(m["head"]) and signal not in IMPORTANT + ("rejected",):
+                    return
             signal = signal or t["signal"]
             pick = next((r for r in cands if r["id"] == t["app_id"]), None)  # a suggestion, never a decision
     if signal is None and not NOREPLY.search(m["frm"]) and (row or cands or ABOUT.search(m["head"])):

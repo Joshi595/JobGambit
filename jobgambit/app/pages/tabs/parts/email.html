@@ -14,6 +14,12 @@
         </span>
       </label>
 
+      <div class="msg info" x-show="e.address.includes('@') && Array.isArray(t('email.steps.' + e.provider))">
+        <b x-text="t('email.steps_t', {provider: name(e.provider)})"></b>
+        <p class="small" x-text="t('email.steps.' + e.provider)[0]"></p>
+        <ol class="small"><template x-for="s in t('email.steps.' + e.provider).slice(1)"><li x-text="s"></li></template></ol>
+      </div>
+
       <div class="grid">
         <label class="field" for="em-provider"><span x-text="t('email.provider')"></span>
           <select id="em-provider" x-model="e.provider" @change="save()">

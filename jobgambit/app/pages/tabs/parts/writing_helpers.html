@@ -1,0 +1,61 @@
+<!-- Let AI help with the letter and CV instructions (setup step 6 and Profile › Writing), inside <div data-writing="cvField,letterField">:
+     learn from letters you wrote, pick one of three openings, or four quick questions turned into rules by the Ask box.
+     What comes back lands in the editors; nothing is saved until their Save. -->
+<details class="panel how" x-data="writingHelpers">
+  <summary x-text="t('helpers.title')"></summary>
+  <div class="stack">
+    <div class="cards two" role="radiogroup" :aria-label="t('helpers.title')">
+      <template x-for="w in ['own', 'openings', 'questions']" :key="w">
+        <label class="opt-card"><input type="radio" name="help-way" class="sr-only" :value="w" x-model="way">
+          <b x-text="t('helpers.' + w)"></b><small x-text="t('helpers.' + w + '_d')"></small></label>
+      </template>
+    </div>
+    <div class="msg info busy-note" x-show="helpBusy" role="status"><span class="spinner" aria-hidden="true"></span><span x-text="helpBusy"></span></div>
+    <div class="msg bad" x-show="helpErr" role="alert" x-text="helpErr"></div>
+
+    <template x-if="way === 'own'">
+      <div class="stack">
+        <div><label class="btn"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-upload"/></svg><span x-text="t('helpers.upload')"></span>
+          <input type="file" class="sr-only" multiple accept=".pdf,.docx,.txt,.md" @change="letters($event)" :disabled="!!helpBusy"></label></div>
+        <label class="field"><span x-text="t('helpers.paste')"></span><textarea x-model="samples" rows="8"></textarea>
+          <span class="hint" x-text="t('helpers.voice_only')"></span></label>
+        <div><button type="button" class="btn primary" :disabled="!!helpBusy || samples.trim().split(/\s+/).length < 60" @click="makeStyle()"
+                     x-text="t('helpers.learn')"></button></div>
+      </div>
+    </template>
+
+    <template x-if="way === 'openings' || way === 'questions'">
+      <label class="field"><span x-text="t('helpers.tone')"></span>
+        <select x-model="tone"><template x-for="o in ['formal', 'neutral', 'friendly']" :key="o"><option :value="o" :selected="o === tone" x-text="t('helpers.tone_' + o)"></option></template></select></label>
+    </template>
+
+    <template x-if="way === 'openings'">
+      <div class="stack">
+        <div><button type="button" class="btn" :disabled="!!helpBusy" @click="getOpenings()">
+          <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-sparkles"/></svg><span x-text="t('helpers.openings_go')"></span></button></div>
+        <template x-if="openings.length">
+          <div class="stack">
+            <p class="muted small" x-text="t('helpers.pick')"></p>
+            <div class="openings" role="radiogroup" :aria-label="t('helpers.pick')">
+              <template x-for="(o, i) in openings" :key="i">
+                <label class="opt-card"><input type="radio" name="opening" class="sr-only" :value="i" x-model.number="opening">
+                  <b x-text="o.style"></b><span class="opening" x-text="o.text"></span></label>
+              </template>
+            </div>
+            <div><button type="button" class="btn primary" :disabled="!!helpBusy || opening < 0" @click="makeStyle()" x-text="t('helpers.use')"></button></div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <template x-if="way === 'questions'">
+      <form class="stack" @submit.prevent="rules()">
+        <template x-for="q in ['lead', 'always', 'never']" :key="q">
+          <label class="field"><span x-text="t('helpers.' + q)"></span><input x-model="answers[q]" :placeholder="t('helpers.' + q + '_ph')"></label>
+        </template>
+        <p class="muted small" x-text="t('helpers.length_note')"></p>
+        <div><button class="btn primary" x-text="t('helpers.make_rules')"></button></div>
+      </form>
+    </template>
+  </div>
+</details>

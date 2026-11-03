@@ -75,9 +75,14 @@ def seed():
     """Every run: the target countries' pack sites (universities, institutes; new ones in a pack update arrive this way).
     Once: the person's companies.yaml, plus a free link check over every stored posting and application."""
     from jobgambit.core import countries, search
-    for t in pf.Preferences.model_validate(pf.read("preferences")).targets:
-        for c in countries.pack(t.code).get("career_sites") or []:
-            add(c["kind"], c["ref"], c["name"], "pack")
+    packs = [c for t in pf.Preferences.model_validate(pf.read("preferences")).targets for c in countries.pack(t.code).get("career_sites") or []]
+    for c in packs:
+        add(c["kind"], c["ref"], c["name"], "pack")
+    keep = {(c["kind"], (c["ref"] if c["kind"] == "page" else c["ref"].rstrip("/")).lower()) for c in packs}
+    with db() as con:  # a pack site a pack update replaced (e.g. a university's professorships list, now its research list)
+        for r in con.execute("select kind, ref from sites where origin='pack'").fetchall():
+            if (r["kind"], r["ref"].lower()) not in keep:
+                con.execute("delete from sites where kind=? and ref=?", (r["kind"], r["ref"]))
     state = search.load_state()
     if state.get("sites_seeded"):
         return

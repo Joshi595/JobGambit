@@ -59,7 +59,7 @@ def board(show: str = "open"):
     for r in rows:
         r["applied_before"] = applied[(r["company"] or "").lower()]
         data = json.loads(r.pop("data") or "{}")
-        r["site_url"], r["applicants"] = data.get("site_url", ""), data.get("applicants")
+        r["site_url"], r["applicants"], r["ai"] = data.get("site_url", ""), data.get("applicants"), data.get("ai")
         r["link"] = r["site_url"] or r["url"]
         tag, r["why"] = reason(r["why"])
         r["reason"] = tag if r["status"] == "filtered" else ""
@@ -69,7 +69,7 @@ def board(show: str = "open"):
 def reason(why):
     """'[weak] text' -> ('weak', 'text'). Untagged or [junk] -> off-topic."""
     m = re.match(r"\[(\w+)\]\s*", why or "")
-    return (m[1] if m and m[1] in ("weak", "type", "excluded") else "offtopic"), (why or "")[m.end() if m else 0:]
+    return (m[1] if m and m[1] in ("weak", "type", "excluded", "old", "duplicate") else "offtopic"), (why or "")[m.end() if m else 0:]
 
 
 @router.get("/sources")

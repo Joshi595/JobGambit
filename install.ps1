@@ -63,4 +63,6 @@ switch ($choice) {
 }
 
 Write-Host "`nDone. Starting JobGambit... (next time: the 'Start JobGambit' icon on your desktop)`n" -ForegroundColor Green
+# The PATH as the installers above left it: JobGambit finds the AI app installed a minute ago
+$env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 Start-Process $app

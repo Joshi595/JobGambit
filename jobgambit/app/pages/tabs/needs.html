@@ -88,7 +88,8 @@
                   <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-mail"/></svg><span x-text="t('needs.open_mail')"></span></a>
                 <button class="btn primary sm" :disabled="busy || (m.group === 'link' && !picks[m.id])" @click="done(m)"
                         x-text="m.group === 'act' ? t('needs.done') : t('needs.save')"></button>
-                <button class="btn ghost sm" x-show="m.group === 'link'" :disabled="busy" @click="dismiss(m)" x-text="t('needs.dismiss')"></button>
+                <button class="btn ghost sm" x-show="m.group === 'link' || asks(m)" :disabled="busy" @click="dismiss(m)"
+                        x-text="m.group === 'link' ? t('needs.dismiss') : t('needs.not_app')"></button>
               </div>
             </div>
           </li>

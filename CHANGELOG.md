@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.17.6 (2026-11-03)
+
+- **German:** Settings › Appearance › App language › Deutsch. Every page is in German; server messages, alerts and
+  mail summaries follow later.
+- **Fit score:** how much of what a posting requires you have, with reasons like "meets 5 of 6 skill requirements ·
+  missing: AUTOSAR". Old postings and second listings of the same job go to Less relevant.
+- **Honest keywords:** each keyword of a posting is checked against your skills (in your CV, you have it, related, not
+  in your profile). A tailored CV never claims a skill you don't have.
+- **Review:** each CV section before and after, side by side; the letter next to the facts it uses.
+- **Writing** has its own place in the sidebar, with the AI helpers for your style, one letter-length setting and
+  better default instructions.
+- **CV upload:** protected PDFs and photos of a CV work; clear messages instead of server errors.
+- **Email:** step-by-step help to connect Gmail, Outlook, Yahoo, iCloud, GMX, WEB.DE, Zoho and Fastmail. A refused
+  password says to use an app password, instead of showing the provider's raw error.
+- **Needs you:** a job alert is no longer taken for an interview invitation; "Not about an application" clears a mail
+  in one click; a card's title opens the posting.
+- **Board:** ⭐ moves a posting to the Starred list, with Undo. Once you applied, the same job listed under another
+  name of the employer is hidden. Re-scoring postings can't be cut off halfway.
+
 ## 0.16.2 (2026-10-31)
 
 - pypdf 6.21.4: fixes seven known security issues in reading PDF files (CVE-2026-119203 to -119209).

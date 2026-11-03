@@ -76,8 +76,10 @@ def problem_report():
     """What helps fix a problem, with personal data and secrets removed. The person reads it before sharing."""
     with db() as con:
         counts = {t: con.execute(f"select count(*) from {t}").fetchone()[0] for t in ("jobs", "applications", "needs")}
+        failed = [f"{r['at']} {r['agent']} {r['step']}: {r['error']}" for r in con.execute(
+            "select at, agent, step, error from ai_calls where coalesce(error, '') != '' order by id desc limit 5")][::-1]
     log = []
-    for f in sorted((home()).glob("*.log"))[-3:]:
+    for f in sorted((home()).glob("*.log"))[-3:]:  # app.log: the errors the app caught (server.unexpected)
         log += f.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
     text = "\n".join([
         "## JobGambit problem report",
@@ -85,7 +87,7 @@ def problem_report():
         f"- AI installed: {', '.join(k for k, v in ai.installed().items() if v) or 'none'}",
         f"- Records: {json.dumps(counts)}",
         "- Search sources: " + "; ".join(f"{k}: {v.get('error') or v.get('count')}" for k, v in search.health().items()),
-        "", "### Recent log", *log[-60:], "", "### What happened (write it here)", ""])
+        "", "### Last AI errors", *(failed or ["none"]), "", "### Recent log", *log[-60:], "", "### What happened (write it here)", ""])
     b = pf.read("profile").get("basics") or {}  # who you are stays out too, not only the passwords
     for private in sorted({str(Path.home()), *(str(b.get(k) or "").strip() for k in ("name", "email", "phone"))}, key=len, reverse=True):
         if len(private) >= 4:

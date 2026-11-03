@@ -59,99 +59,139 @@
     <span x-text="err"></span> <button class="btn sm" x-show="!!again" @click="again()" x-text="t('board.retry')"></button>
   </div>
 
-  <!-- 1 Review cards -->
+  <!-- 1 Review: one block per part of the CV, Before | After row by row; then the letter. Change text uses the same blocks. -->
   <template x-if="prop && stage === 'review'">
     <div>
       <div class="msg bad" x-show="fit?.blockers?.length" role="alert"><b x-text="t('apply.blockers')"></b> <span x-text="fit?.blockers?.join(' · ')"></span></div>
       <p class="small" x-show="fit?.deadline || job.deadline"><span x-text="t('apply.deadline')"></span> <b x-text="fmtDate(fit?.deadline || job.deadline)"></b></p>
-      <section class="panel">
-        <h2 class="sub" x-text="t('apply.review_title')"></h2>
-        <p class="small muted" x-text="t('apply.review_intro')"></p>
-        <details class="how small">
-          <summary x-text="t('how.summary')"></summary>
-          <ol><template x-for="k in ['start', 'tailor', 'review', 'you', 'checks']" :key="k"><li x-text="t('how.steps.' + k)"></li></template></ol>
-          <p><span x-text="t('how.change')"></span>
-            <a href="#profile/writing" @click.prevent="$store.app.show('profile', 'writing')" x-text="t('how.change_link')"></a></p>
-        </details>
-        <div class="chips"><template x-for="k in prop.keywords" :key="k">
-          <span class="chip" :class="covered(k) && 'ok'"><svg class="i sm" x-show="covered(k)" aria-hidden="true"><use href="/static/icons.svg#i-check"/></svg><span x-text="k"></span></span>
-        </template></div>
+      <section class="panel rev-bar">
+        <h2 class="sub" x-text="prop.final ? t('apply.change_text') : t('apply.review_title')"></h2>
+        <p class="small muted" x-text="prop.final ? t('apply.final_intro') : t('apply.review_intro')"></p>
+        <template x-for="terms in [prop.terms || []]"><div x-include="keywords.html"></div></template>
         <p class="small msg warn" x-show="prop.missed?.length"><b x-text="t('apply.missed')"></b> <span x-text="prop.missed?.join(' · ')"></span></p>
-        <form class="add-rule" @submit.prevent="startOver(redo)" :aria-label="t('apply.redo_title')">
-          <label class="small" for="redo-in" x-text="t('apply.redo_title')"></label>
-          <div class="inline">
-            <input id="redo-in" x-model="redo" :placeholder="t('apply.redo_hint')">
-            <button class="btn sm" :disabled="!redo.trim() || !!busy" x-text="t('apply.redo_go')"></button>
-          </div>
-          <p class="small muted" x-text="t('apply.redo_note')"></p>
-        </form>
-        <form class="add-rule" @submit.prevent="addRule()" :aria-label="t('apply.rule_title')">
-          <label class="small" for="rule-in" x-text="t('apply.rule_title')"></label>
-          <div class="inline">
-            <select x-model="ruleFor" :aria-label="t('apply.rule_for')">
-              <option value="cv_rules" x-text="t('apply.cv')"></option><option value="style" x-text="t('apply.letter')"></option></select>
-            <input id="rule-in" x-model="rule" :placeholder="t('apply.rule_hint')">
-            <button class="btn sm" :disabled="!rule.trim()" x-text="t('apply.rule_add')"></button>
-          </div>
-          <p class="small muted" role="status" x-text="ruleNote || t('apply.rule_note')"></p>
-        </form>
       </section>
-      <div class="change-sum" x-show="!prop.final">
-        <p x-text="summary()"></p>
-        <div class="chips" role="group" :aria-label="t('apply.filter.label')">
-          <template x-for="f in ['all', 'flagged', 'reworded']" :key="f">
-            <button class="chip" :aria-pressed="show === f" @click="show = f" x-text="t('apply.filter.' + f)"></button></template>
-        </div>
-      </div>
-      <template x-for="(group, gi) in [prop.items, prop.letter]" :key="gi">
-        <section class="rev-group" :class="gi ? 'letter' : 'cv'" x-show="group.length">
-          <h2 class="sub rev-h">
-            <svg class="i" aria-hidden="true"><use :href="'/static/icons.svg#i-' + (gi ? 'mail' : 'file-text')"/></svg>
-            <span x-text="gi ? t('apply.letter') : t('apply.cv')"></span>
-            <span class="count" x-text="t(gi ? 'apply.n_paragraphs' : 'apply.n_changes', {n: group.length})"></span>
-          </h2>
-          <template x-for="c in group.filter(c => visible(c, gi))" :key="c.id">
-            <article class="panel rev" :class="dec[c.id].decision === 'reject' && 'off'">
-              <div class="rev-head">
-                <span class="small" x-text="c.section"></span>
-                <span class="badge" x-show="!prop.final" x-text="t('apply.kind.' + kind(c, gi))"></span>
-                <span class="badge warn" x-show="c.flag"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-alert-triangle"/></svg><span x-text="t('apply.check_this')"></span></span>
-              </div>
-              <p class="small" x-show="c.flag" x-text="t('apply.flagged')"></p>
-              <p class="small muted" x-show="c.reason" x-text="c.reason"></p>
-              <template x-if="'order' in c">
-                <div class="order-cmp">
-                  <div><span class="small muted" x-text="t('apply.before')"></span><ol><template x-for="x in steps(c.old)"><li x-text="x"></li></template></ol></div>
-                  <div><span class="small muted" x-text="t('apply.after')"></span><ol><template x-for="x in steps(c.new)"><li x-text="x"></li></template></ol>
-                    <p class="small muted" x-show="leftOut(c.new)" x-text="leftOut(c.new)"></p></div>
+
+      <template x-for="s in prop.sections || []" :key="s.id">
+        <details class="panel sbs" :open="prop.final || todo(s).length > 0">
+          <summary class="sbs-head">
+            <h3 x-text="title(s)"></h3>
+            <span class="badge" x-show="s.out" x-text="t('apply.left_out')"></span>
+            <span class="badge warn" x-show="todo(s).some(c => c.flag)"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-alert-triangle"/></svg><span x-text="t('apply.check_this')"></span></span>
+            <span class="count small muted" x-show="!prop.final" x-text="todo(s).length ? t('apply.n_changed', {n: todo(s).length}) : t('apply.unchanged')"></span>
+          </summary>
+          <div class="sbs-cols" aria-hidden="true"><span x-text="t('apply.before')"></span><span x-text="t('apply.after')"></span></div>
+          <template x-for="(a, k) in s.after" :key="a.id">
+            <div class="sbs-line" :class="'on-' + chosen(s, a)">
+              <template x-if="toggles(s, a)">
+                <button type="button" class="sbs-row" @click="toggle(a.card)" :aria-pressed="(dec[a.card].decision !== 'reject').toString()"
+                        :title="t(dec[a.card].decision === 'reject' ? 'apply.click_after' : 'apply.click_before')">
+                  <span class="cell was" :data-label="t('apply.before')"><template x-for="(w, j) in cells(s, k)[0]" :key="j"><span :class="[w.op, w.b && 'b']" x-text="w.t"></span></template></span>
+                  <span class="cell now" :data-label="t('apply.after')"><template x-for="(w, j) in cells(s, k)[1]" :key="j"><span :class="[w.op, w.b && 'b']" x-text="w.t"></span></template><span class="tag" x-show="!dec[a.card].text" x-text="t('apply.left_out')"></span><span class="tag" x-show="a.moved" :class="orderOff(s) && 'off'" x-text="a.moved && t('apply.moved_' + a.moved)"></span>
+                    <span class="flag" x-show="card(a.card).flag"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-alert-triangle"/></svg> <span x-text="card(a.card).reason || t('apply.flagged')"></span></span>
+                    <span class="sr-only" x-text="t(dec[a.card].decision === 'reject' ? 'apply.kept_before' : 'apply.kept_after')"></span></span>
+                </button>
+              </template>
+              <template x-if="!toggles(s, a)">
+                <div class="sbs-row">
+                  <div class="cell was" :data-label="t('apply.before')"><template x-for="(w, j) in cells(s, k)[0]" :key="j"><span :class="[w.op, w.b && 'b']" x-text="w.t"></span></template><span class="tag" x-show="!s.before[k].text" x-text="t('apply.not_before')"></span></div>
+                  <div class="cell now" :data-label="t('apply.after')">
+                    <template x-if="!(editing(s) && a.card)"><span><template x-for="(w, j) in cells(s, k)[1]" :key="j"><span :class="[w.op, w.b && 'b']" x-text="w.t"></span></template><span class="tag" x-show="!(a.card ? dec[a.card].text : a.text)" x-text="t('apply.left_out')"></span><span class="tag" x-show="a.moved" :class="orderOff(s) && 'off'" x-text="a.moved && t('apply.moved_' + a.moved)"></span><span class="tag" x-show="a.auto" x-text="t('apply.auto_row')"></span></span></template>
+                    <template x-if="editing(s) && a.card">
+                      <div class="stack">
+                        <textarea x-model="dec[a.card].text" @input="dec[a.card].decision = 'accept'" :aria-label="title(s) + ', ' + t('apply.after')"></textarea>
+                        <input x-model="dec[a.card].comment" :placeholder="t('apply.ask_ai_hint')" :aria-label="t('apply.ask_ai_hint')">
+                      </div>
+                    </template>
+                  </div>
                 </div>
               </template>
-              <template x-if="!('order' in c)">
-                <div class="stack">
-                  <p class="diff-text" x-show="!editing(c) && said(diffOf(c), 'now')"><template x-for="(w, k) in side(diffOf(c), 'now')" :key="k"><span :class="[w.op, w.b && 'b']" x-text="w.t"></span></template></p>
-                  <p class="diff-was" x-show="!editing(c) && c.old"><span class="muted" x-text="t('apply.before') + ': '"></span><template x-for="(w, k) in side(diffOf(c), 'was')" :key="k"><span :class="[w.op, w.b && 'b']" x-text="w.t"></span></template></p>
-                  <textarea x-show="editing(c)" x-model="dec[c.id].text" :aria-label="c.section"></textarea>
-                </div>
-              </template>
-              <div class="rev-acts">
-                <div class="seg" role="radiogroup" :aria-label="c.section" x-show="!prop.final">
-                  <template x-for="d in ['accept', 'reject', 'revise']" :key="d">
-                    <button role="radio" :aria-checked="dec[c.id].decision === d" @click="dec[c.id].decision = d"
-                            x-text="d === 'accept' ? t('apply.accept') : d === 'revise' ? t('apply.revise') : c.old ? t('apply.keep_mine') : t('remove')"></button>
-                  </template>
-                </div>
-                <button class="btn ghost sm" x-show="!('order' in c) && !prop.final" @click="edits[c.id] = !editing(c)">
-                  <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg>
-                  <span x-text="editing(c) ? t('apply.show_changes') : t('apply.edit_text')"></span></button>
-              </div>
-              <input x-show="prop.final || dec[c.id].decision === 'revise'" x-model="dec[c.id].comment"
-                     :placeholder="prop.final ? t('apply.ask_ai_hint') : t('apply.revise_hint')" :aria-label="prop.final ? t('apply.ask_ai_hint') : t('apply.revise_hint')">
-            </article>
+            </div>
           </template>
-        </section>
+          <div class="sbs-foot" x-show="!prop.final && todo(s).length">
+            <div class="seg" role="radiogroup" :aria-label="title(s)">
+              <template x-for="d in ['accept', 'reject']" :key="d">
+                <button role="radio" :aria-checked="(blockState(s) === d).toString()" @click="setBlock(s, d)" x-text="t(d === 'accept' ? 'apply.keep_after' : 'apply.keep_before')"></button>
+              </template>
+            </div>
+            <button class="btn ghost sm" x-show="s.kind !== 'projects'" @click="edits[s.id] = !edits[s.id]" :aria-pressed="(!!edits[s.id]).toString()">
+              <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg><span x-text="edits[s.id] ? t('apply.show_changes') : t('apply.edit')"></span></button>
+            <label class="small" x-show="s.order && s.kind !== 'projects' && !card(s.order)?.same">
+              <input type="checkbox" :checked="!orderOff(s)" @change="dec[s.order].decision = $event.target.checked ? 'accept' : 'reject'">
+              <span x-text="t('apply.new_order')"></span></label>
+          </div>
+        </details>
       </template>
+
+      <section class="panel sbs letter" x-show="prop.letter.length">
+        <div class="sbs-head"><h3 x-text="t('apply.letter')"></h3>
+          <span class="count small muted" x-show="!prop.final" x-text="t('apply.letter_kept', {n: prop.letter.filter(c => dec[c.id].decision !== 'reject').length, of: prop.letter.length})"></span></div>
+        <div class="grid letter-head">
+          <label class="field"><span x-text="t('apply.subject')"></span><input x-model="head.subject"></label>
+          <label class="field"><span x-text="t('apply.salutation')"></span><input x-model="head.salutation"></label>
+        </div>
+        <div class="sbs-cols" aria-hidden="true"><span x-text="t('apply.based_on')"></span><span x-text="t('apply.paragraph')"></span></div>
+        <template x-for="c in prop.letter" :key="c.id">
+          <div class="sbs-line" :class="'on-' + (dec[c.id].decision === 'reject' ? 'off' : 'now')">
+            <div class="sbs-row">
+              <div class="cell was" :data-label="t('apply.based_on')">
+                <template x-for="(f, j) in c.based || []" :key="j"><p class="fact"><span class="where" x-show="f.where" x-text="f.where"></span><span x-text="f.text"></span></p></template>
+                <span class="tag" x-show="!(c.based || []).length" x-text="c.reason || t('apply.based_none')"></span>
+              </div>
+              <div class="cell now" :data-label="t('apply.paragraph')">
+                <template x-if="!editing({id: 'letter'})">
+                  <button type="button" class="para" @click="toggle(c.id)" :aria-pressed="(dec[c.id].decision !== 'reject').toString()"
+                          :title="t(dec[c.id].decision === 'reject' ? 'apply.click_keep' : 'apply.click_leave')">
+                    <span x-text="dec[c.id].text"></span><span class="tag" x-show="dec[c.id].decision === 'reject'" x-text="t('apply.left_out')"></span></button>
+                </template>
+                <template x-if="editing({id: 'letter'})">
+                  <div class="stack">
+                    <textarea x-model="dec[c.id].text" @input="dec[c.id].decision = 'accept'" :aria-label="c.section"></textarea>
+                    <input x-model="dec[c.id].comment" :placeholder="t('apply.ask_ai_hint')" :aria-label="t('apply.ask_ai_hint')">
+                  </div>
+                </template>
+              </div>
+            </div>
+          </div>
+        </template>
+        <div class="sbs-foot" x-show="!prop.final">
+          <button class="btn ghost sm" @click="edits.letter = !edits.letter" :aria-pressed="(!!edits.letter).toString()">
+            <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg><span x-text="edits.letter ? t('apply.show_changes') : t('apply.edit')"></span></button>
+        </div>
+      </section>
+
+      <details class="panel more" x-show="!prop.final">
+        <summary x-text="t('apply.more')"></summary>
+        <div class="stack">
+          <form class="add-rule" @submit.prevent="startOver(redo)" :aria-label="t('apply.redo_title')">
+            <label class="small" for="redo-in" x-text="t('apply.redo_title')"></label>
+            <div class="inline">
+              <input id="redo-in" x-model="redo" :placeholder="t('apply.redo_hint')">
+              <button class="btn sm" :disabled="!redo.trim() || !!busy" x-text="t('apply.redo_go')"></button>
+            </div>
+            <p class="small muted" x-text="t('apply.redo_note')"></p>
+          </form>
+          <form class="add-rule" @submit.prevent="addRule()" :aria-label="t('apply.rule_title')">
+            <label class="small" for="rule-in" x-text="t('apply.rule_title')"></label>
+            <div class="inline">
+              <select x-model="ruleFor" :aria-label="t('apply.rule_for')">
+                <option value="cv_rules" x-text="t('apply.cv')"></option><option value="style" x-text="t('apply.letter')"></option></select>
+              <input id="rule-in" x-model="rule" :placeholder="t('apply.rule_hint')">
+              <button class="btn sm" :disabled="!rule.trim()" x-text="t('apply.rule_add')"></button>
+            </div>
+            <p class="small muted" role="status" x-text="ruleNote || t('apply.rule_note')"></p>
+          </form>
+          <div><button type="button" class="btn sm" @click="$store.app.show('profile', 'writing')" :title="t('apply.edit_instructions_d')">
+            <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg><span x-text="t('apply.edit_instructions')"></span></button></div>
+          <details class="how small">
+            <summary x-text="t('how.summary')"></summary>
+            <ol><template x-for="k in ['start', 'tailor', 'review', 'you', 'checks']" :key="k"><li x-text="t('how.steps.' + k)"></li></template></ol>
+            <p><span x-text="t('how.change')"></span>
+              <a href="#profile/writing" @click.prevent="$store.app.show('profile', 'writing')" x-text="t('how.change_link')"></a></p>
+          </details>
+        </div>
+      </details>
       <div class="sticky savebar">
-        <span class="lbl small" x-text="prop.final ? t('apply.changed', {n: changedCount()}) : t('apply.decided', {a: tally('accept'), r: tally('reject'), c: tally('revise')})"></span>
+        <span class="lbl small" x-text="prop.final ? t('apply.changed', {n: changedCount()}) : t('apply.decided', counts())"></span>
         <button class="btn ghost" x-show="prop.final" :disabled="!!busy" @click="submit(true)" x-text="t('apply.back_to_docs')"></button>
         <button class="btn primary" :disabled="!!busy" @click="submit()" x-text="prop.final ? t('apply.save_rebuild') : t('apply.submit_review')"></button>
       </div>
@@ -184,10 +224,10 @@
                 <span x-text="r.fails.length ? t('apply.checks_failed', {n: r.fails.length}) : t('apply.checks_ok')"></span></span>
               <template x-for="f in r.fails" :key="f"><span class="ev bad" x-text="f"></span></template>
               <template x-for="w in r.warns" :key="w"><span class="ev" x-text="w"></span></template>
-              <span class="ev" x-show="r.coverage[1].length" x-text="t('apply.missing_kw') + ' ' + r.coverage[1].join(', ')"></span>
             </li>
           </template>
         </ul>
+        <template x-for="terms in [checks?.cv?.terms || []]"><div x-include="keywords.html"></div></template>
         <h3 class="sub" x-text="t('apply.docs_ai')"></h3>
         <label class="field"><span class="small muted" x-text="t('apply.docs_ai_hint')"></span>
           <textarea rows="2" x-model="ask" :placeholder="t('apply.docs_ai_placeholder')"></textarea></label>
@@ -219,6 +259,7 @@
           <button class="btn" :disabled="!!busy" @click="rebuild()" x-text="t('apply.rebuild')"></button>
           <button class="btn" :disabled="!!busy" @click="editText()" :title="t('apply.change_text_hint')">
             <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg><span x-text="t('apply.change_text')"></span></button>
+          <button class="btn ghost" @click="$store.app.show('profile', 'writing')" :title="t('apply.edit_instructions_d')" x-text="t('apply.edit_instructions')"></button>
         </div>
       </section>
       <section class="panel stack">

@@ -1,0 +1,23 @@
+<!-- The posting's keywords by what the CV says about them (terms: apply.keywords on the server, never guessed here).
+     Review and Documents both show it. Teal: in the CV; neutral: not (yet). -->
+<details class="kw-bar" x-show="terms.length" :open="innerWidth > 640">
+  <summary class="small" x-text="t('apply.keywords_n', {n: terms.filter(k => k.in_cv).length, of: terms.length})"></summary>
+  <template x-for="g in kwGroups(terms)" :key="g.id">
+    <div class="kw-group">
+      <span class="small muted" x-text="t('apply.kw.' + g.id)"></span>
+      <div class="chips"><template x-for="k in g.terms" :key="k.id">
+        <span class="kw-term">
+          <template x-if="askable(k)">
+            <button type="button" class="chip kw-add" @click="askAdd(k)" :aria-pressed="asked(k).toString()" :title="t(asked(k) ? 'apply.kw.asked' : 'apply.kw.ask_hint')">
+              <svg class="i sm" aria-hidden="true"><use :href="'/static/icons.svg#i-' + (asked(k) ? 'check' : 'plus')"/></svg><span x-text="k.term"></span></button>
+          </template>
+          <template x-if="!askable(k)">
+            <span class="chip" :class="['kw-' + g.id, k.in_cv && k.have < 1 && 'warn']" :title="k.in_cv && k.have < 1 ? t('apply.kw.unclaimed') : k.name">
+              <svg class="i sm" x-show="g.id === 'cv'" aria-hidden="true"><use :href="'/static/icons.svg#i-' + (k.have < 1 ? 'alert-triangle' : 'check')"/></svg>
+              <span x-text="k.term"></span><span class="muted" x-show="k.related.length" x-text="'· ' + k.related.join(', ')"></span></span>
+          </template>
+        </span>
+      </template></div>
+    </div>
+  </template>
+</details>

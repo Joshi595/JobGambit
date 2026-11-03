@@ -182,6 +182,7 @@ button.chip:hover, label.chip:hover { border-color:var(--ink-3); }
 button.link { padding:0; border:0; background:none; font:inherit; color:var(--accent); text-decoration:underline; text-underline-offset:2px; cursor:pointer; }
 .chip.ok { background:var(--ok-soft); border-color:transparent; color:var(--ok); }
 .chip[aria-pressed=true] { background:var(--accent-soft); border-color:var(--accent); color:var(--accent); }
+.chip.part[aria-pressed=true] { border-style:dashed; background:var(--surface); }
 .badge { display:inline-flex; align-items:center; gap:4px; padding:1px 8px; border-radius:var(--r-pill); font-size:var(--fs-1); font-weight:500;
          background:var(--surface-2); color:var(--ink-2); }
 .badge.accent { background:var(--accent-soft); color:var(--accent); }
@@ -225,6 +226,7 @@ ul.jobs > .item, ul.apps > .item { content-visibility:auto; contain-intrinsic-si
 .job-title:hover { color:var(--accent); text-decoration:underline; }
 .job-title .i { color:var(--ink-3); }
 .job-meta { font-size:var(--fs-2); color:var(--ink-2); }
+.need a.job-meta { display:block; width:fit-content; font-weight:600; color:var(--accent, inherit); }
 .job-note { width:100%; margin-top:var(--s1); font-size:var(--fs-2); }
 .job-why { display:flex; flex-wrap:wrap; gap:4px 6px; align-items:center; margin-top:var(--s1); font-size:var(--fs-2); color:var(--ink-3); }
 .job-acts { display:flex; gap:2px; align-items:center; flex:none; }
@@ -550,6 +552,8 @@ h2 small.opt { margin-left:var(--s2); font-size:var(--fs-3); }
 .ex-link { margin-left:var(--s2); }
 .paste { margin-top:var(--s2); }
 .busy-note { display:flex; align-items:center; gap:var(--s2); }
+.drop { border:2px dashed var(--line); border-radius:var(--r-panel); padding:var(--s4); }  /* a CV file can be dropped here */
+.drop.over { border-color:var(--accent); background:var(--accent-soft); }
 .spinner { width:16px; height:16px; flex:none; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .openings { display:grid; gap:var(--s3); }
@@ -586,21 +590,75 @@ button.design-card:hover { border-color:var(--ink-3); }
 .reqs .yes > .i { color:var(--ok); } .reqs .partly > .i { color:var(--warn); } .reqs .no > .i { color:var(--danger); }
 .reqs .ev { grid-column:2; font-size:var(--fs-2); color:var(--ink-2); }
 .reqs .ev.bad { color:var(--danger); }
-/* review: the CV and the letter each get their own colour, on the heading and every card's left edge */
-.rev-group { --doc: var(--accent); --doc-soft: var(--accent-soft); }
-.rev-group.letter { --doc: var(--st-interview); --doc-soft: var(--st-interview-soft); }
-.rev-h { display:flex; align-items:center; gap:var(--s2); margin:var(--s5) 0 var(--s2); padding:var(--s2) var(--s3);
-         background:var(--doc-soft); color:var(--doc); border-radius:var(--r-control); }
-.rev-h .count { margin-left:auto; font-size:var(--fs-3); }
-.panel.rev { display:grid; gap:var(--s2); border-left:4px solid var(--doc); }
-.panel.rev .rev-head > span:first-child { margin-right:auto; color:var(--ink); font-weight:500; }
-/* every card shows its whole text: the box grows with it, no inner scroll (ponytail: field-sizing is Chromium + Firefox 136+; older browsers get a resizable box) */
-.panel.rev textarea, textarea.grow-box { field-sizing:content; min-height:3lh; }
-.panel.rev > * { margin:0; }
-.panel.rev .seg { justify-self:start; }
-.panel.rev.off textarea { color:var(--ink-3); }
-.rev-head { display:flex; align-items:center; justify-content:space-between; gap:var(--s2); flex-wrap:wrap; }
-.rev del { color:var(--ink-3); }
+/* review, side by side: one block per part of the CV, Before | After row by row. The side that will print is lit (full
+   ink, a rule in the document's colour); the other stays readable, dimmed. The CV is teal, the letter violet. */
+.sbs { --doc:var(--accent); --doc-soft:var(--accent-soft); padding:0; overflow:hidden; border-left:4px solid var(--doc); margin-bottom:var(--s3); }
+.sbs.letter { --doc:var(--st-interview); --doc-soft:var(--st-interview-soft); }
+.sbs-head { display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap; padding:var(--s3) var(--s4); }
+.sbs-head h3 { flex:1 1 16rem; margin:0; font-size:var(--fs-4); font-weight:500; }
+details.sbs > summary { cursor:pointer; list-style:none; }
+details.sbs > summary::-webkit-details-marker { display:none; }
+details.sbs > summary::before { content:""; flex:none; width:7px; height:7px; margin:0 2px; border:solid var(--ink-3); border-width:0 2px 2px 0;
+                                transform:rotate(-45deg); transition:transform .15s; }
+details.sbs[open] > summary::before { transform:rotate(45deg); }
+details.sbs:not([open]) h3 { color:var(--ink-2); font-weight:400; }  /* nothing to decide: folded, the lines one click away */
+.sbs-cols, .sbs-row { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); }
+.sbs-cols { border-top:1px solid var(--line); font-size:var(--fs-2); color:var(--ink-3); }
+.sbs-cols span { padding:var(--s1) var(--s4); }
+.sbs-cols span:first-child, .cell.was { background:var(--surface-2); }
+.sbs-line { border-top:1px solid var(--line); }
+.sbs-row, .para { width:100%; margin:0; padding:0; border:0; border-radius:0; background:none; color:inherit; font:inherit; text-align:left; }
+button.sbs-row, .para { cursor:pointer; }
+button.sbs-row:hover, .para:hover { box-shadow:inset 0 0 0 1px var(--doc); }
+button.sbs-row:focus-visible, .para:focus-visible { outline-offset:-2px; }
+.cell { display:block; min-width:0; padding:var(--s2) var(--s4); font-size:var(--fs-3); line-height:1.55; color:var(--ink-2); overflow-wrap:anywhere; }
+.on-now .cell.now, .on-was .cell.was { color:var(--ink); box-shadow:inset 3px 0 var(--doc); }
+.on-now .cell.was, .on-was .cell.now, .on-off .cell.now { color:var(--ink-3); }
+.cell .b { font-weight:700; }
+.cell .add { background:var(--ok-soft); box-shadow:inset 0 -2px var(--ok); }
+.cell .del { color:var(--danger); text-decoration:line-through; }
+.on-was .cell .add { background:none; box-shadow:none; }  /* kept as it was: nothing added, nothing removed */
+.on-was .cell .del { color:inherit; text-decoration:none; }
+.cell .tag { display:inline-block; margin-left:var(--s2); padding:0 6px; border:1px solid var(--line); border-radius:var(--r-pill);
+             font-size:var(--fs-1); line-height:1.6; color:var(--ink-2); background:var(--surface); white-space:nowrap; }
+.cell .tag:first-child { margin-left:0; }
+.cell .tag.off { text-decoration:line-through; color:var(--ink-3); }
+.cell .flag { display:flex; gap:var(--s1); align-items:flex-start; margin-top:var(--s1); font-size:var(--fs-2); color:var(--warn); white-space:normal; }
+.cell .flag .i { margin-top:2px; flex:none; }
+.cell .stack { gap:var(--s2); }
+/* every line shows its whole text: the box grows with it, no inner scroll (ponytail: field-sizing is Chromium + Firefox 136+; older browsers get a resizable box) */
+.sbs textarea, textarea.grow-box { field-sizing:content; min-height:3lh; }
+.sbs-foot { display:flex; align-items:center; gap:var(--s2) var(--s3); flex-wrap:wrap; padding:var(--s2) var(--s4); border-top:1px solid var(--line); }
+.sbs-foot label { display:inline-flex; align-items:center; }
+.letter-head { padding:0 var(--s4) var(--s3); }
+.sbs.letter .cell.was { color:var(--ink-2); font-size:var(--fs-2); }
+.sbs.letter .cell.now { font-size:var(--fs-4); }
+.fact { margin:0 0 var(--s2); }
+.fact:last-of-type { margin-bottom:0; }
+.fact .where { display:block; font-size:var(--fs-1); color:var(--ink-3); }
+.para { display:block; }
+.para > span:first-child { white-space:pre-wrap; }  /* the paragraph as written; the template's own line breaks stay out (cells wrap normally) */
+.rev-head { display:flex; align-items:center; justify-content:space-between; gap:var(--s2); flex-wrap:wrap; }  /* practice cards */
+.rev-bar { display:grid; gap:var(--s2); }
+.rev-bar > * { margin:0; }
+.kw-bar > summary { cursor:pointer; color:var(--ink-2); }
+.kw-bar[open] > summary { margin-bottom:var(--s2); }
+.kw-group { display:grid; gap:4px; }
+.kw-group + .kw-group { margin-top:var(--s2); }
+/* the posting's keywords: in the CV teal, the rest neutral (never the green of added words) */
+.chip.kw-cv { background:var(--accent-soft); border-color:transparent; color:var(--accent); }
+.chip.kw-cv.warn { background:var(--warn-soft); color:var(--warn); }
+.chip.kw-add { border-style:dashed; border-color:var(--accent); }
+.chip.kw-missing { background:var(--surface-2); color:var(--ink-2); }
+.chip.kw-related { border-radius:var(--r-control); }  /* with its entry it can wrap */
+@media (max-width: 640px) {  /* phones: Before above After, each cell named */
+  .sbs-cols { display:none; }
+  .sbs-row { grid-template-columns:minmax(0, 1fr); }
+  .cell, .sbs-head, .sbs-foot, .letter-head { padding-inline:var(--s3); }
+  .cell::before { content:attr(data-label); display:block; font-size:var(--fs-1); color:var(--ink-3); }
+  .on-same .cell.was { display:none; }  /* nothing to choose: only what prints */
+  .on-same .cell::before { content:none; }
+}
 /* what changed, as two whole sentences: the new one (added words softly marked, read in one go) and, below, the
    original (removed words struck through); bold as the PDF shows it */
 .diff-text { margin:0; font-size:var(--fs-4); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
@@ -608,15 +666,8 @@ button.design-card:hover { border-color:var(--ink-3); }
 .diff-text .b, .diff-was .b { font-weight:700; }
 .diff-was { margin:calc(-1 * var(--s2)) 0 0; font-size:var(--fs-3); line-height:1.5; color:var(--ink-3); white-space:pre-wrap; overflow-wrap:anywhere; }
 .diff-was .del { color:var(--danger); text-decoration:line-through; }
-.rev-acts { display:flex; align-items:center; gap:var(--s2); flex-wrap:wrap; }
-.panel.rev.off .diff-text, .panel.rev.off .diff-was, .panel.rev.off .order-cmp { opacity:.5; }  /* kept as it was: the suggestion stays readable, dimmed */
-.change-sum { display:grid; gap:var(--s2); margin:var(--s4) 0 0; }
-.change-sum p { margin:0; font-weight:500; }
-.order-cmp { display:grid; grid-template-columns:1fr 1fr; gap:var(--s4); font-size:var(--fs-3); }
-.order-cmp ol { margin:var(--s1) 0 0; padding-left:var(--s5); }
 .doc-diffs { display:grid; gap:var(--s3); margin:0; padding:0; list-style:none; }
 .doc-diffs li { display:grid; gap:2px; padding:var(--s2) var(--s3); border-radius:var(--r-control); background:var(--surface-2); }
-@media (max-width: 640px) { .order-cmp { grid-template-columns:1fr; } }
 .doc-files .btn { max-width:100%; }
 .doc-files .btn span { overflow-wrap:anywhere; text-align:left; }
 @media (max-width: 640px) {

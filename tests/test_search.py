@@ -509,6 +509,8 @@ def test_arbeitsagentur_research_feed_and_texts(home, monkeypatch):
         assert con.execute("select status from jobs where key='b'").fetchone()[0] == "expired"
 
 
+
+
 def test_rescore_follows_new_job_types(home):
     from jobgambit.core import profile as pf
     from jobgambit.core.data import db

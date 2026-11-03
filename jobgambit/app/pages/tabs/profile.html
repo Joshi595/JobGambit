@@ -5,7 +5,7 @@
       <p x-text="$store.app.draft ? t('profile.review_banner') : t('profile.intro')"></p>
     </div>
   </div>
-  <nav x-show="!$store.app.draft" :aria-label="t('profile.views')">
+  <nav :aria-label="t('profile.views')">
     <button :aria-pressed="!['details', 'writing', 'letter'].includes($store.app.sub)" @click="$store.app.show('profile')" x-text="t('profile.tab_cv')"></button>
     <button :aria-pressed="$store.app.sub === 'details'" @click="$store.app.show('profile', 'details')" x-text="t('profile.tab_details')"></button>
     <button :aria-pressed="['writing', 'letter'].includes($store.app.sub)" @click="$store.app.show('profile', 'writing')" x-text="t('profile.tab_writing')"></button>
@@ -13,12 +13,12 @@
 
   <div x-show="!$store.app.draft && !['writing', 'letter'].includes($store.app.sub)" x-include="ask.html"></div>
 
-  <template x-if="$store.app.sub === 'details' && !$store.app.draft">
+  <template x-if="$store.app.sub === 'details'">
     <div class="details-part" x-include="details.html"></div>
   </template>
 
   <!-- Writing: how CVs and letters are written. CV instructions, letter instructions, the person's own letter, lessons -->
-  <template x-if="['writing', 'letter'].includes($store.app.sub) && !$store.app.draft">
+  <template x-if="['writing', 'letter'].includes($store.app.sub)">
     <div x-data="writingEditor" x-effect="$store.app.dirty = changed()" class="stack">
       <div class="msg bad" x-show="err" role="alert" x-text="err"></div>
       <p class="muted" x-text="t('profile.writing_intro')"></p>
@@ -35,6 +35,9 @@
         <h2 id="h-style" x-text="t('profile.style_title')"></h2>
         <p class="muted small" x-text="t('profile.style_hint')"></p>
         <textarea class="grow-box" x-model="style" :aria-label="t('profile.style_title')"></textarea>
+        <label class="field"><span x-text="t('profile.length')"></span>
+          <select x-model="letterLength" @change="patchPrefs({ letter_length: letterLength }).then(ok => ok && $store.toast.show(t('saved')))">
+            <template x-for="o in ['full', 'short']" :key="o"><option :value="o" :selected="o === letterLength" x-text="t('profile.length_' + o)"></option></template></select></label>
         <div class="chips" role="group" :aria-label="t('profile.examples')">
           <template x-for="c in t('profile.style_chips')" :key="c">
             <button type="button" class="chip" @click="addRule('style', c)" x-text="'+ ' + c"></button></template>
@@ -43,6 +46,7 @@
       <div class="stack" data-writing="cvRules,style">
         <p class="muted small" x-text="t('ask.writing_intro')"></p>
         <div x-include="ask.html"></div>
+        <div x-include="writing_helpers.html"></div>
       </div>
       <section class="panel stack" aria-labelledby="h-letter">
         <div class="group-head">
@@ -50,6 +54,7 @@
           <label class="btn sm"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-upload"/></svg><span x-text="t('profile.letter_upload')"></span>
             <input type="file" class="sr-only" accept=".pdf,.docx,.txt,.md" @change="upload($event)" :disabled="busy"></label>
         </div>
+        <p class="muted small" x-text="t('profile.letter_intro')"></p>
         <p class="muted small" x-show="!paras.length" x-text="t('profile.letter_empty')"></p>
         <template x-for="(q, i) in paras" :key="q.id">
           <div class="bullet">
@@ -74,7 +79,7 @@
     </div>
   </template>
 
-  <template x-if="($store.app.sub !== 'details' && !['letter', 'writing'].includes($store.app.sub)) || $store.app.draft">
+  <template x-if="!['details', 'writing', 'letter'].includes($store.app.sub)">
   <div x-data="profileEditor" x-effect="$store.app.dirty = changed()">
     <div class="msg bad" x-show="err" role="alert" x-text="err"></div>
     <div class="cv-layout" x-show="!p && !err" aria-busy="true" :aria-label="t('profile.loading')">
@@ -105,19 +110,28 @@
           </div>
           <div class="actions" x-show="!review">
             <label class="btn"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-upload"/></svg><span x-text="t('update.newer_cv')"></span>
-              <input type="file" class="sr-only" accept=".pdf,.docx,.doc,.txt" @change="newerCv($event)"></label>
+              <input type="file" class="sr-only" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg" @change="newerCv($event)"></label>
+            <label class="btn"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-refresh-cw"/></svg><span x-text="t('update.replace_cv')"></span>
+              <input type="file" class="sr-only" accept=".pdf,.docx,.txt,.md,.zip,.json,.png,.jpg,.jpeg" @change="replaceCv($event)"></label>
             <button class="btn" @click="whatsNew()"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-plus"/></svg><span x-text="t('update.whats_new')"></span></button>
             <button class="btn" @click="improve()"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-sparkles"/></svg><span x-text="t('update.improve')"></span></button>
           </div>
 
-          <dialog class="modal" x-ref="upd" :aria-label="t('update.title')" @cancel="busy && $event.preventDefault()" @close="reset()">
+          <dialog class="modal" x-ref="upd" :aria-label="t('update.title')" @close="reset()">
             <div class="dialog-head">
               <h2 x-text="t('update.title')"></h2>
-              <button class="btn ghost icon" :disabled="!!busy" :aria-label="t('close')" @click="reset()"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg></button>
+              <button class="btn ghost icon" :aria-label="t('close')" @click="reset()"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg></button>
             </div>
             <div class="stack">
               <div class="msg info" x-show="busy" role="status" x-text="busy"></div>
               <div class="msg bad" x-show="err" role="alert" x-text="err"></div>
+              <template x-if="mode === 'paste' && !busy">
+                <form class="stack" @submit.prevent="pasteCv()">
+                  <label class="field"><span x-text="t('setup.paste_instead')"></span><textarea x-model="news" rows="8"></textarea></label>
+                  <div class="actions"><button class="btn primary" :disabled="!news.trim()" x-text="t('setup.paste_go')"></button>
+                    <button type="button" class="btn" @click="reset()" x-text="t('cancel')"></button></div>
+                </form>
+              </template>
               <template x-if="mode === 'news' && !busy">
                 <form class="stack" @submit.prevent="addNews()">
                   <label class="field"><span x-text="t('update.whats_new')"></span>
@@ -295,6 +309,20 @@
                     <button class="btn ghost icon" :aria-label="t('remove')" :title="t('remove')" @click="skills.splice(i, 1)"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg></button></div>
                 </template>
                 <div><button class="btn sm" @click="skills.push({cat: '', items: ''})" x-text="t('profile.add_skills')"></button></div>
+                <div class="stack" x-data="skillMap" x-show="!review">
+                  <h3 x-text="t('profile.skillmap.title')"></h3>
+                  <p class="muted small" x-text="t('profile.skillmap.hint')"></p>
+                  <p class="muted small" x-show="!list.length && !busy && !err" x-text="t('profile.skillmap.empty')"></p>
+                  <div class="chips" role="group" :aria-label="t('profile.skillmap.title')" x-show="list.length">
+                    <template x-for="c in list" :key="c.id">
+                      <button type="button" class="chip" :class="state(c) === 'shown' && 'part'" :aria-pressed="c.have >= 0.6"
+                              :title="label(c)" @click="flip(c)" x-text="c.name"></button>
+                    </template>
+                  </div>
+                  <div><button type="button" class="btn sm" :disabled="busy" :title="t('profile.skillmap.rebuild_d')" @click="rebuild()"
+                               x-text="busy ? t('profile.skillmap.busy') : t('profile.skillmap.rebuild')"></button></div>
+                  <div class="msg bad" x-show="err" role="alert" x-text="err"></div>
+                </div>
               </div>
             </template>
 

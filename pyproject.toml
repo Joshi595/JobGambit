@@ -1,6 +1,6 @@
 [project]
 name = "jobgambit"
-version = "0.16.2"
+version = "0.17.6"
 description = "Find jobs and tailor your CV and cover letter with the AI plan you already have. Runs on your own computer."
 readme = "README.md"
 license = "MIT"
@@ -12,7 +12,7 @@ dependencies = [
     "ruamel-yaml>=0.18",
     "babel>=2.16",
     "trafilatura>=2.0",
-    "pypdf>=5",
+    "pypdf[crypto]>=5",  # crypto: AES-protected PDFs (cryptography arrives by itself only on Linux)
     "python-jobspy>=1.1.80",
     "curl-cffi>=0.7",  # browser-like connections for sites that stall anything else (sources.BROWSER_ONLY)
     "rapidfuzz>=3",

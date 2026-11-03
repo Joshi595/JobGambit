@@ -27,7 +27,8 @@
     <p class="step-count small muted" x-text="t('setup.step', {n: step, total: STEPS.length})"></p>
     <h2 id="setup-h" tabindex="-1"><span x-text="stepName(step)"></span>
       <small class="opt" x-show="step > REQUIRED" x-text="t('setup.optional')"></small></h2>
-    <div class="msg info busy-note" x-show="busy" role="status"><span class="spinner" aria-hidden="true"></span><span x-text="busy"></span></div>
+    <div class="msg info busy-note" x-show="busy" role="status"><span class="spinner" aria-hidden="true"></span><span x-text="busy"></span>
+      <span class="muted num" x-show="secs" x-text="t('setup.elapsed', {n: secs})"></span></div>
     <div class="msg bad" x-show="err" role="alert" x-text="err"></div>
 
     <!-- 1 What they look for -->
@@ -80,26 +81,30 @@
     <div class="stack">
       <div class="msg warn" x-show="!agentNames.length">
         <b x-text="t('setup.ai_none_title')"></b> <span x-text="t('setup.ai_none')"></span>
-        <div class="small">Claude: <a href="https://claude.com/download" target="_blank" rel="noopener">claude.com/download</a> ·
+        <div class="small">Claude Code: <a href="https://code.claude.com/docs/en/quickstart" target="_blank" rel="noopener">code.claude.com/docs/en/quickstart</a> ·
           ChatGPT: <a href="https://developers.openai.com/codex" target="_blank" rel="noopener">developers.openai.com/codex</a> ·
           Google: <a href="https://antigravity.google" target="_blank" rel="noopener">antigravity.google</a></div>
-        <div class="actions"><button type="button" class="btn sm" @click="recheck()" x-text="t('setup.ai_check')"></button></div>
+        <div class="actions"><button type="button" class="btn sm" :disabled="!!busy" @click="recheck()" x-text="t('setup.ai_check')"></button></div>
       </div>
-      <p class="small muted" x-show="agentNames.length === 1" x-text="t('setup.ai_found', {name: agentNames[0]})"></p>
+      <p class="small muted" x-show="agentNames.length === 1"><span x-text="t('setup.ai_found', {name: agentNames[0]})"></span>
+        <span class="badge warn" x-show="beta(agentNames[0])" x-text="t('setup.ai_beta')"></span></p>
       <label class="field" x-show="agentNames.length > 1"><span x-text="t('setup.ai_title')"></span>
         <select class="auto" @change="setAgent($event.target.value)">
-          <template x-for="a in agentNames" :key="a"><option :value="a" :selected="a === prefs.agent" x-text="a"></option></template></select></label>
+          <template x-for="a in agentNames" :key="a"><option :value="a" :selected="a === prefs.agent" x-text="a + (beta(a) ? ' (' + t('setup.ai_beta') + ')' : '')"></option></template></select></label>
+      <p class="small" x-show="agentNames.length"><button type="button" class="btn sm" :disabled="testNote === t('health.testing')" @click="testAI()" x-text="t('setup.ai_test')"></button>
+        <span role="status" :class="testNote.startsWith('✓') ? 'ok' : testNote.startsWith('✗') && 'bad'" x-text="testNote"></span></p>
 
       <template x-if="phase === 'upload'">
         <div class="stack">
           <p class="muted" x-text="t('setup.cv_intro')"></p>
-          <div>
+          <div class="drop" data-drop :class="drag && 'over'" @dragover.prevent="drag = true" @dragleave.self="drag = false"
+               @drop.prevent="drag = false; upload($event.dataTransfer.files[0])">
             <label class="btn primary"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-upload"/></svg>
               <span x-text="t('setup.upload_button')"></span>
-              <input type="file" class="sr-only" accept=".pdf,.docx,.doc,.txt,.zip,.json" @change="upload($event)" :disabled="!!busy"></label>
+              <input type="file" class="sr-only" accept=".pdf,.docx,.txt,.md,.zip,.json,.png,.jpg,.jpeg" @change="pick($event)" :disabled="!!busy"></label>
             <p class="small muted" x-text="t('setup.upload_types')"></p>
           </div>
-          <details><summary class="small" x-text="t('setup.paste_instead')"></summary>
+          <details :open="pasteOpen" @toggle="pasteOpen = $el.open"><summary class="small" x-text="t('setup.paste_instead')"></summary>
             <div class="stack paste">
               <textarea x-model="text" rows="6" :aria-label="t('setup.paste_instead')"></textarea>
               <div><button type="button" class="btn sm" :disabled="!!busy || !text.trim()" @click="paste()" x-text="t('setup.paste_go')"></button></div>
@@ -275,6 +280,9 @@
         <h3 id="s-style" class="sub" x-text="t('profile.style_title')"></h3>
         <p class="muted small" x-text="t('setup.style.intro')"></p>
         <textarea class="grow-box" rows="8" x-model="styleText" :aria-label="t('profile.style_title')"></textarea>
+        <label class="field"><span x-text="t('profile.length')"></span>
+          <select x-model="letterLength" @change="patchPrefs({ letter_length: letterLength })">
+            <template x-for="o in ['full', 'short']" :key="o"><option :value="o" :selected="o === letterLength" x-text="t('profile.length_' + o)"></option></template></select></label>
         <div class="chips" role="group" :aria-label="t('profile.examples')">
           <template x-for="c in t('profile.style_chips')" :key="c">
             <button type="button" class="chip" @click="addRule('styleText', c)" x-text="'+ ' + c"></button></template>
@@ -284,55 +292,8 @@
       <div class="stack" data-writing="cvRules,styleText">
         <p class="muted small" x-text="t('ask.writing_intro')"></p>
         <div x-include="ask.html"></div>
+        <div x-include="writing_helpers.html"></div>
       </div>
-      <details class="panel how">
-      <summary x-text="t('setup.style.helpers')"></summary>
-      <div class="stack">
-      <div class="cards two" role="radiogroup" :aria-label="t('setup.steps.writing')">
-        <template x-for="w in ['own', 'none']" :key="w">
-          <label class="opt-card"><input type="radio" name="style-way" class="sr-only" :value="w" x-model="styleWay">
-            <b x-text="t('setup.style.' + w)"></b><small x-text="t('setup.style.' + w + '_d')"></small></label>
-        </template>
-      </div>
-
-      <template x-if="styleWay === 'own'">
-        <div class="stack">
-          <div><label class="btn"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-upload"/></svg><span x-text="t('setup.style.upload')"></span>
-            <input type="file" class="sr-only" multiple accept=".pdf,.docx,.txt,.md" @change="letters($event)" :disabled="!!busy"></label></div>
-          <label class="field"><span x-text="t('setup.style.paste')"></span><textarea x-model="samples" rows="8"></textarea>
-            <span class="hint" x-text="t('setup.style.voice_only')"></span></label>
-          <div><button type="button" class="btn primary" :disabled="!!busy || samples.trim().split(/\s+/).length < 60" @click="makeStyle()"
-                       x-text="t('setup.style.learn')"></button></div>
-        </div>
-      </template>
-
-      <template x-if="styleWay === 'none'">
-        <div class="stack">
-          <div class="grid">
-            <label class="field"><span x-text="t('setup.tone')"></span>
-              <select x-model="tone"><template x-for="o in ['formal', 'neutral', 'friendly']" :key="o"><option :value="o" :selected="o === tone" x-text="t('setup.tone_' + o)"></option></template></select></label>
-            <label class="field"><span x-text="t('setup.length')"></span>
-              <select x-model="length"><template x-for="o in ['short', 'standard']" :key="o"><option :value="o" :selected="o === length" x-text="t('setup.length_' + o)"></option></template></select></label>
-          </div>
-          <div><button type="button" class="btn" :disabled="!!busy" @click="getOpenings()">
-            <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-sparkles"/></svg><span x-text="t('setup.style.openings')"></span></button></div>
-          <template x-if="openings.length">
-            <div class="stack">
-              <p class="muted small" x-text="t('setup.style.pick')"></p>
-              <div class="openings" role="radiogroup" :aria-label="t('setup.style.pick')">
-                <template x-for="(o, i) in openings" :key="i">
-                  <label class="opt-card"><input type="radio" name="opening" class="sr-only" :value="i" x-model.number="opening">
-                    <b x-text="o.style"></b><span class="opening" x-text="o.text"></span></label>
-                </template>
-              </div>
-              <div><button type="button" class="btn primary" :disabled="!!busy || opening < 0" @click="makeStyle()" x-text="t('setup.style.use')"></button></div>
-            </div>
-          </template>
-        </div>
-      </template>
-
-      </div>
-      </details>
       <div class="actions">
         <button type="button" class="btn" @click="go(5)" x-text="t('back')"></button>
         <button type="button" class="btn primary" :disabled="!!busy" @click="styleDone()" x-text="t('setup.continue')"></button>

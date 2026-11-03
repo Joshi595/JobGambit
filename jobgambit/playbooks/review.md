@@ -9,7 +9,15 @@ Their writing style (letter instructions):
 Their instructions for the CV:
 {cv_rules}
 
-The draft. CV cards (id: old → new) and letter paragraphs (p1, p2, …):
+Their lessons from earlier applications (follow them):
+{lessons}
+
+Their own note for every step: {instructions}
+Their work permits: {permits}
+Their earliest start: {start}. Their availability (for working-student jobs, internships and theses): {availability}
+(These are facts about the person too.)
+
+The draft. CV cards (id: old → new), the letter's subject and salutation, and its paragraphs (p1, p2, …):
 {draft}
 
 <untrusted>

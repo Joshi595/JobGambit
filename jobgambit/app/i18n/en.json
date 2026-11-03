@@ -10,7 +10,8 @@
     "designs": "Designs",
     "settings": "Settings",
     "help": "Help",
-    "apply": "Apply"
+    "apply": "Apply",
+    "writing": "Writing"
   },
   "nav": {
     "main": "Main",
@@ -37,6 +38,7 @@
   "working": "Working… this can take a minute.",
   "quit": "Quit JobGambit",
   "quit_done": "JobGambit has stopped. You can close this tab.",
+  "error_status": "Something went wrong (error {n}). Try again; if that happens again, copy a problem report in Help.",
   "health": {
     "title": "Health check",
     "data": "Your data folder",
@@ -49,6 +51,7 @@
     "works": "works",
     "failed": "failed",
     "sign_in": "Sign in",
+    "sign_in_opened": "A window opened: log in there, then press Test.",
     "backup": "Download a backup",
     "update": "Check for updates",
     "export": "Export profile as JSON Resume",
@@ -74,6 +77,10 @@
     "ai_title": "Which AI do you use?",
     "ai_none": "JobGambit needs an AI plan you already have (Claude, ChatGPT or Google). Install its app, sign in once, then press Check again.",
     "ai_check": "Check again",
+    "ai_still_none": "No AI app found yet. Finish its installer and sign in once, then press Check again. Still nothing? Quit JobGambit (Help › Quit JobGambit) and start it again.",
+    "ai_test": "Test my AI",
+    "ai_beta": "beta: run Test first",
+    "elapsed": "{n} s",
     "upload": "Upload your CV (PDF or Word), a LinkedIn data export (ZIP) or a JSON Resume file",
     "paste": "Or paste the text of your CV",
     "paste_go": "Use this text",
@@ -93,13 +100,6 @@
     "suggest": "Suggest job titles and search words",
     "titles": "Job titles (comma-separated)",
     "keywords": "Search words in {lang} (comma-separated)",
-    "tone": "Tone",
-    "tone_formal": "Formal",
-    "tone_neutral": "Neutral",
-    "tone_friendly": "Friendly",
-    "length": "Cover letter length",
-    "length_short": "Short (4 paragraphs, about 300 words)",
-    "length_standard": "Standard (5 paragraphs, about 450–500 words: a full page)",
     "style_result": "Your writing style (you can edit it)",
     "finish": "Start finding jobs",
     "city": "City you live in",
@@ -108,7 +108,7 @@
     "ai_found": "Using {name} on this computer.",
     "cv_intro": "Upload your current CV. Any CV is fine: JobGambit turns it into your master CV, which every tailored CV is made from.",
     "upload_button": "Choose your CV file",
-    "upload_types": "PDF or Word. A LinkedIn data export (ZIP) or a JSON Resume file works too.",
+    "upload_types": "PDF, Word (.docx) or text, or a photo of your CV. A LinkedIn data export (ZIP) or a JSON Resume file works too. You can also drop the file here.",
     "paste_instead": "Or paste the text of your CV",
     "no_cv": "I don't have a CV yet",
     "reading": "Reading your CV… (about a minute)",
@@ -178,22 +178,7 @@
     "remove_country": "Remove {c}",
     "skip_style": "Skip: use the default style",
     "style": {
-      "helpers": "Or let AI learn your style: from letters you wrote, or from an opening you like",
-      "intro": "Letters JobGambit writes should sound like you. Learn from letters you wrote, or pick from three openings written from your CV. Skip it and JobGambit starts from sensible defaults; you can refine them any time in Profile › Writing.",
-      "own": "I have letters I wrote",
-      "own_d": "Upload or paste one or more. Only your voice is taken from them, never their facts.",
-      "none": "I don't have any",
-      "none_d": "Pick a tone, then choose the opening that sounds most like you.",
-      "upload": "Upload letters (PDF, Word or text)",
-      "paste": "Your letters (paste or upload; about 60 words at least)",
-      "voice_only": "Used once to learn how you write, then forgotten.",
-      "learn": "Learn my style",
-      "openings": "Suggest three openings",
-      "pick": "Which one sounds most like you?",
-      "use": "Use this style",
-      "reading": "Reading your letters…",
-      "writing": "Writing three openings from your CV… (about a minute)",
-      "making": "Writing your style guide… (about a minute)"
+      "intro": "Letters JobGambit writes should sound like you. Let AI help below: learn from letters you wrote, pick one of three openings written from your CV, or answer four quick questions. Skip it and JobGambit starts from sensible defaults; you can refine them any time in Profile › Writing."
     },
     "design_intro": "Click a design to use it for your CVs. You can fine-tune it later under Designs.",
     "auto_intro": "Let JobGambit work while you're away: a search every day and, if you like, applications sent for you.",
@@ -341,7 +326,9 @@
     "add_paragraph": "Add paragraph",
     "style_title": "Letter instructions",
     "style_hint": "How your cover letters should sound and be built. The “Banned phrases” list at the end is checked in every CV and letter.",
-    "edit_letter": "Edit in Profile › Writing",
+    "length": "Letter length",
+    "length_full": "One full page (450–500 words)",
+    "length_short": "Short (300–350 words)",
     "sections_nav": "CV sections",
     "loading": "Loading your CV…",
     "load_failed": "Couldn't load your CV.",
@@ -375,7 +362,7 @@
       "Never change job titles or dates"
     ],
     "style_chips": [
-      "Keep it short: four paragraphs",
+      "Keep sentences short and plain",
       "Less formal, but still professional",
       "Open with why this company, not with my name",
       "Mention my earliest start date in the last paragraph"
@@ -384,7 +371,19 @@
     "lessons_title": "Lessons from past applications",
     "lessons_hint": "What you corrected before. JobGambit adds to these after each application; edit or delete freely.",
     "master_note": "This is your master CV. Every application starts from it, and tailoring never changes it.",
-    "asked": "Asked for most in your applications, missing from this CV:"
+    "asked": "Asked for most in your applications, missing from this CV:",
+    "skillmap": {
+      "title": "Skills JobGambit matches on",
+      "hint": "A posting's fit score is how much of what it asks for you have. Filled: named on your CV. Half: shown by your work, not named. Plain: you don't have it yet, so postings asking for it say so. Click one to change it.",
+      "have": "You have this",
+      "shown": "Shown by your work",
+      "not": "Not on your CV",
+      "yours": "(your choice)",
+      "empty": "No skill map yet. JobGambit makes one at the next search, or now with Rebuild.",
+      "rebuild": "Rebuild",
+      "rebuild_d": "Ask your AI for the skills again (one short run), keeping what's here",
+      "busy": "Building the skill map…"
+    }
   },
   "board": {
     "add_intro": "Paste a link to a job posting, or copy the whole posting text in.",
@@ -402,6 +401,7 @@
     "discarded": "Draft thrown away.",
     "skip": "Skip",
     "skipped": "Skipped.",
+    "starred_one": "Starred: it's in the Starred list now.",
     "apply": "Apply",
     "search": "Search now",
     "searching": "Searching…",
@@ -441,8 +441,11 @@
       "weak": "Weak match",
       "type": "Other job types",
       "excluded": "Your hidden words or companies",
+      "old": "Posted over 2 months ago",
+      "duplicate": "Listed twice",
       "offtopic": "Off-topic"
     },
+    "ai": "AI: {n}",
     "band": {
       "strong": "Strong fit",
       "good": "Good fit",
@@ -506,19 +509,14 @@
     "drafting": "Writing your CV and cover letter, then a second AI pass reviews them like a hiring manager… (1-3 minutes)",
     "building": "Making your PDFs and checking them…",
     "review_title": "Check the changes",
-    "review_intro": "Green words are covered. Accept, change the text, keep your original, or ask for changes. Nothing is invented: every line comes from your profile.",
+    "review_intro": "Each line shows before and after. Click a line to switch it, or use Keep after or Keep before under each part. Nothing is invented: every line comes from your profile.",
     "missed": "Not covered yet:",
     "cv": "CV",
     "letter": "Cover letter",
-    "flagged": "Check this one: it may stretch what your profile says. It keeps your original unless you accept it.",
-    "accept": "Accept",
-    "keep_mine": "Keep my original",
-    "revise": "Ask for changes",
-    "revise_hint": "What should change?",
+    "flagged": "Check this one: it may stretch what your profile says. It stays as before unless you click it.",
     "submit_review": "Done: make my PDFs",
     "docs_title": "Your documents",
     "checks_ok": "all checks passed",
-    "missing_kw": "Keywords not in the CV:",
     "rebuild": "Use this design",
     "change_text": "Change text",
     "change_text_hint": "Edit any line of the CV or the letter; the PDFs are rebuilt without AI",
@@ -531,8 +529,6 @@
     "changed": "{n} changed",
     "back_to_docs": "Back to documents",
     "save_rebuild": "Save and rebuild PDFs",
-    "n_changes": "{n} cards",
-    "n_paragraphs": "{n} paragraphs",
     "finish_title": "When you've sent it",
     "method": "How you applied",
     "note": "Note (optional)",
@@ -547,7 +543,7 @@
       "sent": "Sent"
     },
     "check_this": "Check this",
-    "decided": "{a} accepted · {r} kept as they were · {c} to change",
+    "decided": "{a} new · {r} as before · {c} for AI to rewrite · {u} unchanged",
     "checks": "Checks",
     "checks_failed": "{n} problem(s) to fix",
     "open_folder": "Open folder",
@@ -617,26 +613,8 @@
     "rule_add": "Add",
     "rule_note": "Used from your next application on. All your instructions: Profile › Writing.",
     "rule_added": "Added. It's used from your next application on (Profile › Writing has them all).",
-    "kind": {
-      "reworded": "Reworded",
-      "reviewer": "Reviewer's wording",
-      "order": "Order",
-      "summary": "Profile text",
-      "skills": "Skills",
-      "removed": "Left out",
-      "letter": "Letter paragraph"
-    },
-    "sum": "{n} changes to your CV: {parts}",
-    "sum_letter": "letter: {n} paragraphs",
-    "filter": {
-      "label": "Show",
-      "all": "All",
-      "flagged": "To check",
-      "reworded": "Reworded lines"
-    },
     "before": "Before",
     "after": "After",
-    "edit_text": "Edit the text",
     "show_changes": "Show the changes",
     "what_changed": "What changed",
     "methods": {
@@ -644,7 +622,50 @@
       "email": "Email",
       "job_board": "Job board",
       "other": "Other"
-    }
+    },
+    "final_intro": "Every line your PDFs show, with your profile's wording on the left. Change any line on the right: the PDFs are rebuilt without AI. A note in the box under a line asks AI to rewrite just that one.",
+    "sec": {
+      "summary": "Profile text",
+      "projects": "Which projects are shown",
+      "skills": "Skills"
+    },
+    "n_changed": "{n} to decide",
+    "unchanged": "unchanged",
+    "left_out": "left out",
+    "not_before": "not on your CV before",
+    "moved_up": "↑ moved",
+    "moved_down": "↓ moved",
+    "auto_row": "small edit, accepted for you",
+    "click_after": "Click to use the new text",
+    "click_before": "Click to keep the text as it was",
+    "kept_after": "New text used.",
+    "kept_before": "Kept as it was.",
+    "keep_after": "Keep after",
+    "keep_before": "Keep before",
+    "edit": "Edit",
+    "new_order": "Use the new line order",
+    "letter_kept": "{n} of {of} paragraphs kept",
+    "subject": "Subject",
+    "salutation": "Salutation",
+    "based_on": "Based on",
+    "paragraph": "Paragraph",
+    "based_none": "No CV line: about the employer, or the closing",
+    "click_keep": "Click to keep this paragraph",
+    "click_leave": "Click to leave this paragraph out",
+    "more": "More: write it again, add an instruction",
+    "keywords_n": "Keywords from the posting: {n} of {of} in your CV",
+    "kw": {
+      "cv": "In your CV",
+      "add": "You have it, the CV doesn't say it yet",
+      "related": "Related experience (described, never claimed as a skill)",
+      "missing": "Not in your profile (never added; worth preparing for the interview)",
+      "ask": "Use the posting's word \"{term}\" here, if this line's fact supports it.",
+      "ask_hint": "Ask AI to add it where your facts support it",
+      "asked": "Asked: AI rewrites that line when you click Done (click again to take it back)",
+      "unclaimed": "Your CV names it, your profile doesn't: check it's true"
+    },
+    "edit_instructions": "Edit instructions",
+    "edit_instructions_d": "How every CV and letter is written: Profile › Writing"
   },
   "applications": {
     "empty": "No applications yet. Apply from the Board and they show up here.",
@@ -803,7 +824,7 @@
       "doc_language": "Language of CV and letter",
       "review_depth": "How much to review",
       "design": "CV design",
-      "instructions": "My instructions",
+      "instructions": "My note for every AI step",
       "cost_level": "Cost level",
       "search_time": "Daily search",
       "ai_ranking": "AI re-ranking",
@@ -815,7 +836,8 @@
       "sources_off": "Sources switched off",
       "prefer_companies": "Preferred companies",
       "avoid_companies": "Hidden companies",
-      "exclude_words": "Hidden title words"
+      "exclude_words": "Hidden title words",
+      "letter_length": "Letter length"
     },
     "countries": "Countries",
     "countries_d": "Where you want to work. Postings are searched in each.",
@@ -877,13 +899,11 @@
     "depth_all": "Every change",
     "depth_big": "Only bigger changes",
     "depth_none": "Just show me the PDFs",
-    "instructions": "Instructions for every AI step",
-    "instructions_d": "Added to every AI step, also forms and follow-up emails. For CVs and letters, use Profile › Writing.",
+    "instructions": "A note for every AI step",
+    "instructions_d": "Added to every AI step that writes for you: CV and letter, the reviewer, forms, follow-up emails and interview answers. Never to steps that only read or sort, such as importing your CV or reading your mail. How CVs and letters are written: Profile › Writing.",
     "instructions_hint": "e.g. Always mention my volunteering at the Red Cross.",
     "style": "CV and letter instructions",
-    "style_d": "Your CV instructions, letter instructions, your own letter and lessons are together in Profile › Writing.",
-    "lessons": "Lessons from past applications",
-    "lessons_d": "What you corrected before. JobGambit adds to these.",
+    "style_d": "Your CV instructions, letter instructions and letter length, your own letter and lessons, with AI to help: all in Profile › Writing.",
     "lessons_hint": "Empty until you correct something.",
     "agent": "Which AI",
     "agent_d": "The AI plan JobGambit uses on this computer. Claude runs with no tools; ChatGPT and Google are in beta and can read files on this computer.",
@@ -917,8 +937,8 @@
     "json": "Profile as JSON Resume",
     "json_d": "The open CV format other tools read.",
     "json_go": "Export JSON",
-    "prompts": "AI instructions",
-    "prompts_d": "Advanced: your own copies of the instructions JobGambit gives the AI.",
+    "prompts": "AI prompt files (advanced)",
+    "prompts_d": "Your own copies of the prompts JobGambit gives the AI, to change by hand. For how CVs and letters are written, use Profile › Writing instead.",
     "prompts_go": "Open the folder",
     "delete_title": "Delete everything",
     "delete_hint": "Removes your profile, jobs, applications, saved passwords and the daily search from this computer. The documents you added to your upload folder stay there. Type DELETE to confirm. This can't be undone.",
@@ -937,7 +957,8 @@
     "coverage": "{n} searches, each again within {d} days (it looks back {back})",
     "coverage_gap": "{n} searches come round only every {d} days, but it looks back {back}: some postings can be missed. Fewer search words help.",
     "second_look": "Second look at filtered postings",
-    "second_look_d": "After each search, the AI reads the titles filtered out today (one short run) and brings back the ones that could still fit you, saying why."
+    "second_look_d": "After each search, the AI reads the titles filtered out today (one short run) and brings back the ones that could still fit you, saying why.",
+    "style_go": "Open the editors"
   },
   "designer": {
     "base": "Start from design",
@@ -1013,6 +1034,58 @@
     "password_saved": "App password (saved; type to replace)",
     "password_d": "Not your normal password: an app password made for JobGambit. It's kept in your computer's password store.",
     "help": "How to get an app password",
+    "steps_t": "How to connect {provider}",
+    "steps": {
+      "gmail": [
+        "Gmail doesn't let apps sign in with your normal Google password. You make a separate app password for JobGambit.",
+        "Turn on 2-Step Verification if it's off: Google Account › Security.",
+        "Open myaccount.google.com/apppasswords (the link above), type the name JobGambit and press Create.",
+        "Google shows 16 letters, like “abcd efgh ijkl mnop”. Copy them into App password below (the spaces don't matter) and press Connect."
+      ],
+      "outlook": [
+        "Outlook doesn't let apps sign in with your normal password. You make a separate app password for JobGambit.",
+        "Turn on two-step verification: account.microsoft.com › Security.",
+        "There, under Advanced security options › App passwords, create a new app password.",
+        "Copy it into App password below and press Connect."
+      ],
+      "yahoo": [
+        "Yahoo doesn't let apps sign in with your normal password. You make a separate app password for JobGambit.",
+        "Yahoo Account › Account security › Generate app password (the link above shows how).",
+        "Copy it into App password below and press Connect."
+      ],
+      "icloud": [
+        "iCloud doesn't let apps sign in with your normal Apple password. You make an app-specific password for JobGambit.",
+        "account.apple.com › Sign-In and Security › App-Specific Passwords (needs two-factor authentication).",
+        "Copy it into App password below and press Connect."
+      ],
+      "gmx": [
+        "GMX lets apps in only after you allow it.",
+        "In GMX: Settings › POP3/IMAP access › switch on “Allow access via POP3 and IMAP” (the link above shows how).",
+        "Type your normal GMX password below (with two-factor authentication on: an app password) and press Connect."
+      ],
+      "web.de": [
+        "WEB.DE lets apps in only after you allow it.",
+        "In WEB.DE: Settings › POP3/IMAP access › switch on “Allow access via POP3 and IMAP” (the link above shows how).",
+        "Type your normal WEB.DE password below (with two-factor authentication on: an app password) and press Connect."
+      ],
+      "zoho": [
+        "Zoho Mail lets apps in only after you allow it.",
+        "In Zoho Mail: Settings › Mail Accounts › switch on IMAP access.",
+        "With two-factor authentication on: accounts.zoho.eu › Security › App passwords, create one.",
+        "Type it (or your normal password without two-factor) below and press Connect."
+      ],
+      "fastmail": [
+        "Fastmail doesn't let apps sign in with your normal password.",
+        "Settings › Privacy & Security › App passwords › New app password, access “IMAP and SMTP”.",
+        "Copy it into App password below and press Connect."
+      ],
+      "custom": [
+        "Most providers let apps in only after you allow it, and some only with an app password.",
+        "Switch on IMAP access in your email provider's settings.",
+        "If your provider offers app passwords, make one for JobGambit and use it instead of your normal password.",
+        "Check the servers below with your provider's help pages, then press Connect."
+      ]
+    },
     "connect": "Connect and send a test email",
     "connecting": "Connecting…",
     "need_address": "Type your email address first.",
@@ -1036,6 +1109,7 @@
     "done": "Done",
     "save": "Save",
     "dismiss": "Not sure – dismiss",
+    "not_app": "Not about an application",
     "wrong": "Wrong? Link it",
     "recheck": "Check these again",
     "rechecked": "{n} found their application.",
@@ -1140,6 +1214,9 @@
   "update": {
     "title": "Keep your CV up to date",
     "newer_cv": "Upload newer CV",
+    "replace_cv": "Replace my CV with this file",
+    "replaced": "Your whole CV becomes what was read from {from}: {jobs} jobs and {edu} education entries. Nothing of the CV you have now is kept.",
+    "pasted": "the text you pasted",
     "whats_new": "Tell us what's new",
     "improve": "Improve with questions",
     "news_hint": "In your own words, e.g. “Since May 2026 I'm a Senior Nurse at Example Hospital, leading a team of 6. I also got my ALS certificate.”",
@@ -1270,7 +1347,7 @@
     "writing_placeholder": "e.g. everything in English, shorter letters, my projects before my jobs",
     "writing_chips": [
       "Write my CV and letters in English",
-      "Keep letters short and direct",
+      "Shorter letters, direct and plain",
       "Put my projects before my work experience",
       "Never mention my age or nationality"
     ],
@@ -1296,6 +1373,41 @@
       "My earliest start is 1 January",
       "Add a skill: Docker"
     ]
+  },
+  "helpers": {
+    "title": "Let AI help: learn from your letters, pick an opening, or answer four quick questions",
+    "own": "I have letters I wrote",
+    "own_d": "Upload or paste one or more. Only your voice is taken from them, never their facts.",
+    "openings": "Pick an opening",
+    "openings_d": "Choose a tone, then the one of three openings written from your CV that sounds most like you.",
+    "questions": "Four quick questions",
+    "questions_d": "Your tone, what to lead with, what to always and never mention: AI turns them into rules in the box above.",
+    "upload": "Upload letters (PDF, Word or text)",
+    "paste": "Your letters (paste or upload; about 60 words at least)",
+    "voice_only": "Used once to learn how you write, then forgotten.",
+    "learn": "Learn my style",
+    "tone": "Tone",
+    "tone_formal": "Formal",
+    "tone_neutral": "Neutral",
+    "tone_friendly": "Friendly",
+    "openings_go": "Suggest three openings",
+    "pick": "Which one sounds most like you?",
+    "use": "Use this style",
+    "lead": "What should your CV and letters lead with?",
+    "lead_ph": "e.g. my projects, my hospital experience",
+    "always": "What should they always mention?",
+    "always_ph": "e.g. my driving licence, my volunteering",
+    "never": "What should they never mention?",
+    "never_ph": "e.g. my age, my last employer's name",
+    "length_note": "How long your letters are: Letter length, under the letter instructions.",
+    "make_rules": "Turn into rules",
+    "ask_tone": "Write my letters in a {v} tone.",
+    "ask_lead": "Lead my CV and letters with {v}.",
+    "ask_always": "Always mention {v}.",
+    "ask_never": "Never mention {v}.",
+    "reading": "Reading your letters…",
+    "writing": "Writing three openings from your CV… (about a minute)",
+    "making": "Writing your style guide… (about a minute)"
   },
   "how": {
     "summary": "How this was made",

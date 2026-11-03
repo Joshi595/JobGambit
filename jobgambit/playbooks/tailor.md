@@ -12,7 +12,7 @@ Their lessons from earlier applications (follow them):
 Wordings they approved before, per line id (reuse one when it fits, word for word):
 {variants}
 
-Their own instructions: {instructions}
+{stories}Their own note for every step: {instructions}
 
 Their instructions for the CV (follow them; they never add facts):
 {cv_rules}
@@ -28,11 +28,17 @@ For this draft only (the person asked for it now; it overrides the instructions 
 {posting}
 </untrusted>
 
+What the posting asks for, read against their facts by JobGambit (requirements first):
+They have these (their facts name them): use the posting's word for each where a fact supports it.
+{has}
+Not in their facts: never claim these, in the CV or the letter, not even reworded. One marked "related" may only be described as the work the facts state, never named as their skill.
+{lacks}
+When the CV and letter are not in the posting's language, write each term as that language names it (one of the names in brackets, if any).
+
 job (read off the posting):
 - company, role (without gender markers like m/w/d), employment_type, ref_id (reference number if given), deadline (YYYY-MM-DD if given).
 - country: ISO alpha-2 code of the job's location (best guess); language: ISO 639-1 code of the language you wrote the CV and letter in.
 - blockers: hard blockers only: work permit or visa sponsorship the posting rules out for this person, a required language level the person does not have, a required licence or registration the profile lacks, or a clash with their stated availability (e.g. the posting needs 20 h/week, a mandatory internship or a later end of studies). Empty when none.
-- keywords: 15-20 literal terms from the posting that an applicant-tracking system would match (skills, tools, titles).
 - contact_name: the contact person the posting names, or "".
 
 CV:

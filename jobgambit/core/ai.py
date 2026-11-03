@@ -16,9 +16,13 @@ import time
 from datetime import date, timedelta
 from pydantic import BaseModel, ValidationError
 
-LIMIT = re.compile(r"usage limit|session limit|weekly limit|rate.?limit|limit reached|quota|too many requests", re.I)
+LIMIT = re.compile(r"usage limit|session limit|weekly limit|hit your \S+ limit|\d+-hour limit|rate.?limit|limit reached|quota|"
+                   r"too many requests", re.I)
+SIGNED_OUT = re.compile(r"not (?:signed|logged) in|log ?in\b|sign ?in\b|api key|unauthori[sz]ed|\b401\b|"
+                        r"(?:token|session|login) (?:has )?expired", re.I)
 WRITE_STEPS = {"Tailor", "Change", "Revision"}  # answer models (by class name) that write the CV and letter themselves
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+PICTURES = frozenset({".png", ".jpg", ".gif", ".webp"})
 
 
 class AIError(Exception):
@@ -29,16 +33,69 @@ class UsageLimit(AIError):
     """The person's plan limit is reached; the queue should wait for the reset."""
 
 
+def problem(agent, said: str) -> AIError:
+    """What the AI app said went wrong, with what to do first for the ones people meet: the plan's limit, not signed in."""
+    if LIMIT.search(said):
+        return UsageLimit(f"Your {agent.label} plan's usage limit is reached. Try again after it resets, or sign in with "
+                          f"another plan (Help › Sign in). {agent.label} said: {said}")
+    if SIGNED_OUT.search(said):
+        return AIError(f"{agent.label} isn't signed in. Open Help, press Sign in next to {agent.name}, log in once, then try "
+                       f"again. {agent.label} said: {said}")
+    return AIError(f"{agent.label}: {said}")
+
+
+def places() -> list[str]:
+    """Where AI apps' installers put their programs. JobGambit may have started with an older PATH (its installer starts
+    it, an AI app installed since isn't on it): these are looked in too."""
+    home = os.path.expanduser("~")
+    dirs = [os.path.join(home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+    if sys.platform == "win32":
+        dirs += [os.path.join(os.environ[k], *sub) for k, sub in (("APPDATA", ["npm"]), ("LOCALAPPDATA", ["Microsoft", "WinGet", "Links"]))
+                 if os.environ.get(k)]
+        try:  # the user's PATH as it is now, not as it was when JobGambit started
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+                dirs += os.path.expandvars(winreg.QueryValueEx(key, "Path")[0]).split(os.pathsep)
+        except OSError:
+            pass
+    return dirs
+
+
+def find(exe: str) -> str | None:
+    return shutil.which(exe) or shutil.which(exe, path=os.pathsep.join(places()))
+
+
+def stop(p: subprocess.Popen) -> str:
+    """Ends a run that took too long, with every program it started, and returns what it printed. On Windows a .cmd
+    launcher's node.exe outlives the launcher and holds the pipes open: waiting for them would wait forever."""
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(p.pid)], capture_output=True, creationflags=NO_WINDOW)
+        except OSError:
+            pass
+    p.kill()
+    try:
+        return p.communicate(timeout=5)[0] or ""
+    except subprocess.TimeoutExpired:
+        return ""
+
+
 class Agent:
     name = exe = label = ""
     level = "standard"  # economy | standard | premium (Settings -> AI), mapped to a model where the CLI allows it
     answer_env: dict = {}  # extra environment for answer runs
+    reads: frozenset = frozenset()  # files it can read itself (a scanned CV), by extension
 
     def path(self) -> str | None:
-        return shutil.which(self.exe)
+        return find(self.exe)
 
-    def command(self, schema: dict, step: str = "") -> list[str]:
+    def command(self, schema: dict, step: str = "", folder: str = "") -> list[str]:
+        """folder: the run's own folder, with only the files given to run() in it."""
         raise NotImplementedError
+
+    def reply(self, stdout: str, folder: str) -> str:
+        """The answer's text: what the CLI printed (Codex: the file it was told to write it to)."""
+        return stdout
 
     def extract(self, stdout: str) -> dict:
         return json.loads(stdout)
@@ -58,33 +115,50 @@ class Agent:
 
     def call(self, args: list[str], prompt: str, timeout: int, step: str, key: str, env: dict | None = None, cwd: str | None = None,
              mode: str = "") -> str:
-        """One CLI call, recorded in the ai_calls ledger whatever happens (a failed call uses plan limits too)."""
+        """One CLI call, recorded in the ai_calls ledger whatever happens (a failed call uses plan limits too). Output that
+        isn't valid UTF-8 is read anyway; an error says what the CLI said, as its own result line says it (Claude)."""
         start, out, err = time.time(), "", ""
         try:
-            p = subprocess.run(args, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=timeout,
-                               creationflags=NO_WINDOW, env={**os.environ, **env} if env else None, cwd=cwd)
-            out = p.stdout
+            p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
+                                 env={**os.environ, **env} if env else None, cwd=cwd)
+            try:
+                out, stderr = p.communicate(prompt, timeout=timeout)
+            except subprocess.TimeoutExpired:
+                out, err = stop(p), f"no answer within {timeout} s"
+                raise AIError(f"{self.label} didn't answer within {timeout} seconds. Try again; if that happens again, "
+                              "check it with Help › Test.")
             if p.returncode or not out.strip():
-                err = (p.stderr or out).strip()[-500:] or "no answer"
-                raise (UsageLimit if LIMIT.search(err) else AIError)(f"{self.label}: {err}")
+                err = self.failed(out) or (stderr or out).strip()[-500:] or "no answer"
+                raise problem(self, err)
             return out
-        except subprocess.TimeoutExpired:
-            err = f"no answer within {timeout} s"
-            raise AIError(f"{self.label} did not answer within {timeout} s")
+        except OSError as e:  # the program is gone, or isn't one
+            err = str(e)
+            raise AIError(f"{self.label} couldn't be started ({e}). Install it again (Help shows how), then press "
+                          "Check again.") from e
         finally:
             record(step, key, self, out, time.time() - start, err, prompt=prompt, mode=mode)
 
-    def run(self, prompt: str, schema: dict, timeout: int = 600, step: str = "", key: str = "") -> dict:
+    def run(self, prompt: str, schema: dict, timeout: int = 600, step: str = "", key: str = "", files: dict | None = None) -> dict:
+        """files: {name: bytes} put in the run's folder for the AI to read itself (only the kinds it reads)."""
         exe = self.path()
         if not exe:
-            raise AIError(f"{self.label} is not installed")
-        # an empty folder to start in: an AI that has tools (Codex, Antigravity) finds nothing of the person's around it
-        with tempfile.TemporaryDirectory(prefix="jobgambit-ai-") as empty:
-            out = self.call([exe, *self.command(schema, step)], prompt, timeout, step, key, self.answer_env, cwd=empty)
+            raise AIError(f"{self.label} isn't installed on this computer. Install it (Help shows how), then press Check again.")
+        # an empty folder to start in: an AI that has tools (Codex, Antigravity) finds nothing of the person's around it.
+        # A program still holding a file in it after a timeout doesn't turn the cleanup into an error.
+        with tempfile.TemporaryDirectory(prefix="jobgambit-ai-", ignore_cleanup_errors=True) as folder:
+            for name, data in (files or {}).items():
+                with open(os.path.join(folder, name), "wb") as f:
+                    f.write(data)
+            out = self.call([exe, *self.command(schema, step, folder)], prompt, timeout, step, key, self.answer_env, cwd=folder)
+            out = self.reply(out, folder)
         try:
             return self.extract(out)
-        except (ValueError, KeyError) as e:
-            raise AIError(f"{self.label} answered something that is not JSON: {e}")
+        except AIError:
+            raise
+        except Exception as e:  # not JSON, or JSON of another kind
+            raise AIError(f"{self.label} answered something that isn't the JSON asked for ({type(e).__name__}: {e}). "
+                          "Try again; if that happens again, check it with Help › Test.") from e
 
 
 class Claude(Agent):
@@ -92,26 +166,29 @@ class Claude(Agent):
     # An answer run is one turn on a prompt never sent again: a cache write would cost twice the plain input
     # (measured 2026-10-21: $0.060 cached vs $0.031 uncached for the same 7k-token prompt).
     answer_env = {"DISABLE_PROMPT_CACHING": "1"}
+    reads = PICTURES | {".pdf"}
 
     def path(self):
         # ponytail: falls back to the VS Code extension's bundled binary (Joshi's PC); real users install the CLI.
-        found = shutil.which(self.exe) or sorted(glob.glob(os.path.expanduser(
+        found = super().path() or sorted(glob.glob(os.path.expanduser(
             "~/.vscode/extensions/anthropic.claude-code-*/resources/native-binary/claude*")))
         return found if isinstance(found, str) else (found[-1] if found else None)
 
-    def command(self, schema, step=""):
+    def command(self, schema, step="", folder=""):
         # No tools, no MCP, none of the person's own settings, a one-line system prompt (the playbook carries the
         # instructions): one lean model call. Standard writes the documents on Opus (it wrote better CVs and letters in a
         # blind comparison) and runs every other step on Sonnet (half the price); premium is Opus throughout.
+        # A file to read (a scanned CV) in its folder: the Read tool only, which reads nothing outside that folder unasked.
         model = {"economy": "haiku", "premium": "opus"}.get(self.level) or ("opus" if step in WRITE_STEPS else "sonnet")
-        return ["-p", "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(schema), "--tools", "",
+        tools = "Read" if folder and os.listdir(folder) else ""
+        return ["-p", "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(schema), "--tools", tools,
                 "--system-prompt", "Answer only with JSON matching the given schema.",
                 "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", "--model", model]
 
     def extract(self, stdout):
         out = result(stdout)
         if out.get("is_error"):
-            raise (UsageLimit if LIMIT.search(str(out.get("result"))) else AIError)(str(out.get("result")))
+            raise problem(self, str(out.get("result")))
         return out["structured_output"]
 
     def failed(self, stdout):
@@ -223,8 +300,10 @@ class Codex(Agent):
     """Unverified: not installed on the dev machine yet (see docs/spike.md). Codex answers in OpenAI's strict mode,
     which refuses optional fields and free-form dicts: the schema goes through strict() and the answer through loosen()."""
     name, exe, label = "codex", "codex", "ChatGPT (Codex)"
+    reads = PICTURES  # attached with -i
+    ANSWER = "answer.json"  # in the run's folder: the final message alone, whatever else it prints
 
-    def command(self, schema, step=""):
+    def command(self, schema, step="", folder=""):
         # One file per schema, named by its content: reused across calls, so files don't pile up. In the data folder,
         # not the shared temp folder, where another user of the computer could put a file of that name first.
         from jobgambit.core.data import home
@@ -233,17 +312,31 @@ class Codex(Agent):
         if not f.exists():
             f.parent.mkdir(exist_ok=True)
             f.write_text(text, encoding="utf-8")
-        return ["exec", "--output-schema", str(f), "--sandbox", "read-only", "--skip-git-repo-check", "-"]
+        pictures = [os.path.join(folder, n) for n in sorted(os.listdir(folder)) if os.path.splitext(n)[1] in self.reads] if folder else []
+        # -i first: it takes several files and would take the prompt's "-" for one
+        return ["exec", *(["-i", ",".join(pictures)] if pictures else []), "--output-schema", str(f), "--sandbox", "read-only",
+                "--skip-git-repo-check", *(["--output-last-message", os.path.join(folder, self.ANSWER)] if folder else []), "-"]
 
-    def run(self, prompt, schema, timeout=600, step="", key=""):
-        return loosen(super().run(prompt, strict(schema), timeout, step, key), schema)
+    def reply(self, stdout, folder):
+        try:
+            with open(os.path.join(folder, self.ANSWER), encoding="utf-8", errors="replace") as f:
+                return f.read() or stdout
+        except OSError:
+            return stdout
+
+    def run(self, prompt, schema, timeout=600, step="", key="", files=None):
+        out = super().run(prompt, strict(schema), timeout, step, key, files)
+        try:
+            return loosen(out, schema)
+        except Exception as e:  # an answer in neither shape
+            raise AIError(f"{self.label} gave an answer JobGambit can't read: {e}") from e
 
 
 class Antigravity(Agent):
     """Unverified. Reported to print nothing without a terminal: may need a pseudo-terminal."""
     name, exe, label = "antigravity", "agy", "Google (Antigravity)"
 
-    def command(self, schema, step=""):
+    def command(self, schema, step="", folder=""):
         return ["-p", "--output-format", "json", "--json-schema", json.dumps(schema)]
 
     def extract(self, stdout):
@@ -269,16 +362,35 @@ def chosen(name: str = "", level: str = "") -> Agent:
     raise AIError("No AI is installed. Open Help to set one up.")
 
 
-def answer(prompt: str, model: type[BaseModel], agent: Agent, timeout: int = 600, key: str = "") -> BaseModel:
-    """key: the job this call is for, so the ledger can add up each application (a retry is a second call)."""
+def answer(prompt: str, model: type[BaseModel], agent: Agent, timeout: int = 600, key: str = "", files: dict | None = None) -> BaseModel:
+    """key: the job this call is for, so the ledger can add up each application (a retry is a second call).
+    files: {name: bytes} for the AI to read itself (see Agent.run)."""
     schema = model.model_json_schema()
     for attempt in range(2):
         try:
-            return model.model_validate(agent.run(prompt, schema, timeout, model.__name__, key))
+            return model.model_validate(agent.run(prompt, schema, timeout, model.__name__, key, files))
         except ValidationError as e:
             if attempt:
-                raise AIError(f"{agent.label} gave an answer in the wrong shape twice: {e}")
+                wrong = "; ".join(f"{'.'.join(map(str, x['loc']))}: {x['msg']}" for x in e.errors()[:3])
+                raise AIError(f"{agent.label} answered twice in a shape JobGambit can't use. Try again; if that happens "
+                              f"again, check it with Help › Test or choose another AI in Settings › AI. ({wrong})")
             prompt += f"\n\nYour previous answer did not match the required JSON schema:\n{e}\nAnswer again."
+
+
+TESTED = "ai_tested.json"  # Help › Test's last result per AI app: one still in beta says "run Test first" until it passed
+
+
+def tested() -> dict:
+    from jobgambit.core.data import home
+    try:
+        return json.loads((home() / TESTED).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_test(name: str, ok: bool):
+    from jobgambit.core.data import home
+    (home() / TESTED).write_text(json.dumps({**tested(), name: ok}), encoding="utf-8")
 
 
 # ---------------------------------------------------------------- the ledger: every AI call, kept to see where tokens go

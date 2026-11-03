@@ -429,30 +429,101 @@ def join_com(name, ref, ctx):
                 f"https://join.com/companies/{ref}/{r.get('idParam')}", "career site", r.get("createdAt")) for r in items]
 
 
+GENERIC = {"pdf", "download", "herunterladen", "datei", "file", "kb", "mb", "mehr", "more", "details", "detail", "info", "infos",
+           "weiter", "weiterlesen", "lesen", "erfahren", "read", "learn", "view", "ansehen", "hier", "here", "link", "zur", "zum", "stellenausschreibung",
+           "ausschreibung", "ausschreibungstext", "seite", "seiten", "stellenanzeige", "deutsch", "english", "englisch", "engl", "de", "en", "jetzt", "bewerben", "apply", "now"}
+
+
+def generic(text) -> bool:
+    """A link text that is no title: "PDF", "Download (120 KB)", "mehr", "Details", a reference number, or nothing."""
+    return not {w for w in re.findall(r"[^\W\d_]+", text.lower()) if len(w) > 3} - GENERIC  # "a45/26", a reference number, is no title either
+
+
+TAG_END = r"""(?:[^>'"]|"[^"]*"|'[^']*')*>"""  # the end of a tag: a ">" inside an attribute value does not count
+
+
+def around(body, start, end):
+    """The text of the list item, table row or paragraph that a link (body[start:end]) sits in, without the link; if that
+    says nothing (only "mehr" or "Ausschreibungstext (160 KB)"), the blocks around it, inner to outer (four at most)."""
+    before, after = body[max(0, start - 8000):start], body[end:end + 3000]  # class-heavy markup (Freiburg) needs the room
+    text = lambda a, b: " ".join(html.unescape(re.sub("<" + TAG_END, " ", a + " " + b)).split())
+    best = None
+    for tag in ("li", "tr", "p"):
+        opened = [m.end() for m in re.finditer(rf"<{tag}\b" + TAG_END, before, re.I)]
+        closed = [m.start() for m in re.finditer(rf"</{tag}\s*>", before, re.I)]
+        close = re.search(rf"</{tag}\s*>", after, re.I)
+        if opened and close and (not closed or closed[-1] < opened[-1]) and (not best or opened[-1] > best[0]):
+            best = opened[-1], close.start()  # the innermost one still open at the link
+    if best and not generic(text(before[best[0]:], after[:best[1]])):
+        return text(before[best[0]:], after[:best[1]])
+    stack = []  # the divs open at the link, outer to inner
+    for m in re.finditer(r"<div\b" + TAG_END + r"|</div\s*>", before, re.I):
+        if m[0][1] != "/":
+            stack.append(m.end())
+        elif stack:
+            stack.pop()
+    depth, ends = 0, []
+    for m in re.finditer(r"<div\b" + TAG_END + r"|</div\s*>", after, re.I):
+        if m[0][1] != "/":
+            depth += 1
+        elif depth:
+            depth -= 1
+        else:
+            ends.append(m.start())
+    found = ""
+    for opened_at, closed_at in list(zip(reversed(stack), ends))[:6]:
+        block = text(before[opened_at:], after[:closed_at])
+        heading = re.findall(r"<h\d\b" + TAG_END + r"(.*?)</h\d\s*>", before[opened_at:], re.S | re.I)
+        if heading:  # the last heading above the link in this block is the posting's title (TU Freiberg)
+            title = text(heading[-1], "")
+            return block if block.startswith(title) else f"{title} {block}"
+        found = found or ("" if generic(block) else block)
+    return found
+
+
 def page(name, ref, ctx):
     """A plain career page whose links are job titles (check with source-test first): every link that reads like one.
     A ref "<url>#re:<regex>" keeps every link whose href matches the regex instead (pages full of navigation, e.g.
-    universities, where many postings share a title such as "Wissenschaftliche*r Mitarbeiter*in")."""
+    universities, where many postings share a title such as "Wissenschaftliche*r Mitarbeiter*in"). Such a link that
+    only says "PDF" or "Download" (universities' lists of PDF postings) takes its title from its list item or row."""
     url, _, want = ref.partition("#re:")
     status, body, final = http(url)
     if status != 200:
         raise RuntimeError(f"HTTP {status}")
-    out = {}
-    for href, text in re.findall(r'<a\b[^>]*?href="([^"#][^"]*)"[^>]*>(.*?)</a>', body, re.S | re.I):
+    out, named = {}, set()
+    for m in re.finditer(r'<a\b[^>]*?href="([^"#][^"]*)"[^>]*>(.*?)</a>', body, re.S | re.I):
+        href, text = m.groups()
         title = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", text)).split())
         link = urllib.parse.urljoin(final, html.unescape(href))
         if want:
             if not re.search(want, link):
                 continue
+            if link in named:  # a posting linked again: its department or reference number joins the title, "Mehr erfahren" adds nothing
+                if not generic(title) and clean_title(title) not in out[link]["title"]:
+                    out[link]["title"] = clean_title(f"{out[link]['title']}, {title}")[:200]
+                    out[link]["key"] = job_key(out[link]["company"], out[link]["title"])
+                continue
+            if generic(title):
+                if link in out:  # "Jetzt bewerben" after the posting's own link: its title came first
+                    continue
+                text = title = around(body, m.start(), m.end())
             # A card-style link (FAU, stellenwerk): the first block is the title; a second block "Employer · Place" is
             # the employer and the location.
             blocks = [x for x in (" ".join(html.unescape(re.sub(r"<[^>]+>", " ", b)).split())
                                   for b in re.split(r"</?(?:div|p|h\d|li|br)\b[^>]*>", text, flags=re.I)) if x]
-            head = blocks[0] if blocks else title
-            if not 5 <= len(head) <= 200:
+            heading = re.search(r"<h\d[^>]*>(.*?)</h\d>", text, re.S | re.I)  # a heading in the card is the title (Bremen: the deadline comes first)
+            head = " ".join(html.unescape(re.sub(r"<[^>]+>", " ", heading[1])).split()) if heading else blocks[0] if blocks else title
+            if len(head) < 5:
                 continue
+            head = head[:200]  # a table row's whole text can be long: its start is the title
+            if any(o["title"] == clean_title(head) for l, o in out.items() if l != link):  # another posting's title: the Board keeps one of a kind
+                last = urllib.parse.unquote(urllib.parse.urlparse(link).path.rstrip("/").rsplit("/", 1)[-1])  # told apart by the card's next line or a numbered file name
+                extra = blocks[1] if len(blocks) > 1 and clean_title(blocks[1]).lower() != clean_title(head).lower() else last.rsplit(".", 1)[0] if "." in last and re.search(r"\d", last) else ""
+                head = f"{head}, {extra}"[:200] if extra else head
             who, where = (blocks[1].split("·", 1) if len(blocks) > 1 and "·" in blocks[1] and len(blocks[1]) < 200 else (name, ""))
             out[link] = job(head, who.strip(), where.strip(), link, "career site")
+            if title and not generic(title):
+                named.add(link)
         elif 15 <= len(title) <= 200 and re.search(r"(?i)(m/w/d|w/m/d|\(all genders\)|engineer|manager|developer|scientist|mitarbeiter|"
                                     r"ingenieur|entwickler|nurse|assistant|specialist|analyst|research|praktik|werkstud|intern)", title):
             out[title] = job(title, name, "", link, "career site")
@@ -468,18 +539,77 @@ def dvinci(name, ref, ctx):
             for r in rows if r.get("position") and r.get("jobPublicationURL")]
 
 
+def bite_search(script: str) -> dict:
+    """The channel and filter a B-ITE listing's script searches with (e.g. custom.zuordnung in "wbs": research staff).
+    A customer's listings (research staff, professorships, apprenticeships…) share one key; the filter makes the list
+    the listing's own. Values are literals or variables set earlier in the script; one built by the page is left out,
+    as are empty ones (the widget drops those too)."""
+    i = script.find("createSearchConfig(")
+    if i < 0:
+        return {}
+    var = dict(re.findall(r'\b([A-Za-z_$][\w$]*)=("[^"]*"|\d+|\[[^\]]*\])', script[:i]))  # the last value each name was given
+    cfg = script[i:i + 1500]
+
+    def strings(tok):
+        tok = var.get(tok, tok)
+        items = re.findall(r'"[^"]*"|[A-Za-z_$][\w$]*', tok) if tok.startswith("[") else [tok]
+        return [v.strip('"') for v in (var.get(t, t) for t in items) if v.startswith('"') and v.strip('"')]
+    channel = var.get(m[1], m[1]) if (m := re.search(r"channel:([\w$]+)", cfg)) else "0"
+    rules = re.findall(r'("[\w.-]+"|[A-Za-z_]\w*):\{in:(\[[^\]]*\]|[\w$]+)\}', cfg[cfg.find("filter:{"):][:800]) if "filter:{" in cfg else []
+    filt = {k.strip('"'): {"in": v} for k, tok in rules if (v := strings(tok))}
+    return {"channel": int(channel) if channel.isdigit() else 0, **({"filter": filt} if filt else {})}
+
+
 def bite(name, ref, ctx):
     """B-ITE, used by German universities (TU Ilmenau, …): the list its page widget loads. ref "<customer>:<listing>" is
-    the page's data-bite-jobs-api-listing; the widget's own public key is in that listing's script."""
-    customer, listing = ref.split(":", 1)
+    the page's data-bite-jobs-api-listing; the widget's own public key and search are in that listing's script."""
+    customer, listing, *kind = ref.split(":")
     status, script, _ = http(f"https://cs-assets.b-ite.com/{customer}/jobs-api/{listing}.min.js")
-    key = re.search(r'createClient\(\{key:"([0-9a-f]+)"', script or "")
+    var = re.search(r'createClient\(\{key:([\w$]+)\}', script or "")  # the key in a variable: var c="47d6…",b=createClient({key:c})
+    key = re.search(r'createClient\(\{key:"([0-9a-f]+)"', script or "") or var and re.search(rf'(?<![\w$]){re.escape(var[1])}="([0-9a-f]+)"', script)  # $c too
     if not key:
-        raise RuntimeError(f"HTTP {status}" if status != 200 else "no key in the listing")
-    found = get_json("https://jobs.b-ite.com/api/v1/postings/search", data={"key": key[1], "page": {"num": 1000}},
+        if status != 200:
+            raise RuntimeError(f"HTTP {status}")
+        return bite4(name, script, *kind)
+    found = get_json("https://jobs.b-ite.com/api/v1/postings/search", data={"key": key[1], **bite_search(script), "page": {"num": 1000}},
                      headers={"Bite-JobsApi-Client": "v5"})
     return [job(p["title"], name, (p.get("address") or {}).get("city") or "", p["url"], "career site", p.get("activatedOn") or "")
             for p in found.get("jobPostings") or [] if p.get("title") and p.get("url")]
+
+
+BITE4_OTHER = re.compile(r"prof|hochschullehr|niwi|nicht.?wiss|verwalt|ausbild|azubi|praktik|lehre|lehrbeauftr|stipend", re.I)
+
+
+def bite4(name, script, only=""):
+    """B-ITE's older widget ("api-v4", used by Ulm, Hof…): jobs.b-ite.com/adsapi/jobads with the key from the listing's
+    script. The lists a page shows are told apart by a custom field ("Wissenschaftlich", "NiWi", "Prof"…): all but the
+    professorships, non-academic staff, apprenticeships and lecturers are read; a script naming none reads them all.
+    A third part in the ref ("hs-kempten:main-listing:Verwaltung") names the one to read (Kempten keeps research posts there)."""
+    key = re.search(r'"([0-9a-f]{40})"', script)
+    if not key:
+        raise RuntimeError("no key in the listing")
+    kinds = list(dict.fromkeys(re.findall(r'\(\w+,"#[\w-]+",(?:"\d+",)?"([^"]+)"\)', script))) or [""]
+    out = {}
+    for kind in [only] if only else [k for k in kinds if not BITE4_OTHER.search(k)]:
+        q = {"apikey": key[1], "channel": 0, **({"custom_field1[filter][enable]": "true", "custom_field1[filter][value]": kind} if kind else {})}
+        for a in get_json("https://jobs.b-ite.com/adsapi/jobads?" + urllib.parse.urlencode(q)).get("advertisements") or []:
+            if a.get("title") and web((a.get("url") or {}).get("href")):
+                out[a["url"]["href"]] = job(a["title"], name, re.sub(r"^\d+\s*", "", a.get("job_site") or ""), a["url"]["href"], "career site", a.get("ctime") or "")
+    return list(out.values())
+
+
+
+
+def umantis(name, ref, ctx):
+    """Haufe Umantis, used by universities of applied sciences and Helmholtz centres: its public job list, a plain page
+    (ref: the host, recruitingapp-<n>.de.umantis.com)."""
+    return page(name, f"https://{ref}/Jobs/1?lang=ger#re:/Vacancies/\\d+/Description/", ctx)
+
+
+def coveto(name, ref, ctx):
+    """coveto, used by research institutes: its public job list, a plain page (ref: the host, k<n>.coveto.de or the
+    employer's own job domain); the postings sit on /job-<title>-<id>.html."""
+    return page(name, f"https://{ref}/public/jobs/#re:/job-[^/?#]+-\\d+\\.html", ctx)
 
 
 def softgarden(name, ref, ctx):
@@ -505,7 +635,7 @@ def softgarden(name, ref, ctx):
 SCANNERS = {"greenhouse": greenhouse, "ashby": ashby, "lever": lever, "personio": personio, "smartrecruiters": smartrecruiters,
             "workday": workday, "recruitee": recruitee, "workable": workable, "teamtailor": teamtailor, "breezy": breezy,
             "bamboohr": bamboohr, "successfactors": successfactors, "join": join_com, "softgarden": softgarden, "dvinci": dvinci,
-            "bite": bite, "page": page}
+            "bite": bite, "umantis": umantis, "coveto": coveto, "page": page}
 
 # The hiring system a link reveals -> (scanner, ref).
 ATS = [(r"jobs\.ashbyhq\.com/([^/?#]+)", "ashby"), (r"(?:job-)?boards(?:\.eu)?\.greenhouse\.io/(?:embed/[\w/]+\?for=)?([^/?#&]+)", "greenhouse"),
@@ -514,6 +644,7 @@ ATS = [(r"jobs\.ashbyhq\.com/([^/?#]+)", "ashby"), (r"(?:job-)?boards(?:\.eu)?\.
        (r"apply\.workable\.com/([^/?#]+)", "workable"), (r"//([\w-]+\.teamtailor\.com)", "teamtailor"),
        (r"//([\w-]+)\.breezy\.hr", "breezy"), (r"join\.com/companies/([^/?#]+)", "join"), (r"//([\w-]+)\.bamboohr\.com", "bamboohr"),
        (r"//([\w-]+)\.softgarden\.io", "softgarden"), (r"//([\w.-]+)/(?:appo/public/jobWidgetLoader/|jobPublication/list\.json)", "dvinci"),
+       (r"//(recruitingapp-\d+(?:\.de)?\.umantis\.com)", "umantis"), (r"//(k\d+\.coveto\.de)", "coveto"),
        (r"//([\w-]+\.wd\d+\.myworkdayjobs\.com)/(?:[a-z]{2}-[A-Z]{2}/)?([^/?#]+)", "workday")]
 NOT_SLUG = {"embed", "jobs", "o", "l", "api", "v1", "careers", "www", "app", "static"}
 
@@ -535,11 +666,24 @@ def find_ats(url: str):
     return ats_in(body, final or url)
 
 
+BITE = r'data-bite-jobs-api-listing="([\w-]+:[\w.-]+)(?:#[^"]*)?"'  # a B-ITE job widget (Regensburg adds "#einrichtung:0": a filter)
+
+
+def bite_listings(body: str) -> list:
+    """Every B-ITE job widget on a page: a university's page may hold several (research staff, professorships,
+    apprenticeships…), where ats_in() names only the first. Some pages load a listing's script directly."""
+    scripts = [f"{c}:{l}" for c, l in re.findall(r"cs-assets\.b-ite\.com/([\w-]+)/jobs-api/([\w.-]+?)\.min\.js", body or "")]
+    return list(dict.fromkeys(re.findall(BITE, body or "") + scripts))
+
+
 def ats_in(body: str, url: str):
     """The hiring system a fetched careers page uses: a widget or a link inside it, or its own address."""
-    listing = re.search(r'data-bite-jobs-api-listing="([\w-]+:[\w.-]+)"', body or "")  # a B-ITE job widget
+    listing = re.search(BITE, body or "")
     if listing:
         return "bite", listing[1]
+    own = re.search(r'src="https?://([\w.-]+)/jobs\.js', body or "") if "coveto" in (body or "") else None
+    if own:  # a coveto job widget on the employer's own job domain
+        return "coveto", own[1]
     if re.search(r"rmkcdn\.successfactors|job-tile", body or ""):  # SAP SuccessFactors career site (RMK)
         u = urllib.parse.urlparse(url)
         return "successfactors", f"{u.scheme}://{u.netloc}"

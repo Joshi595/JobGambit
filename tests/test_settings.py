@@ -174,7 +174,9 @@ def test_extract_text_from_a_letter(home):
     c = client()
     r = c.post("/api/extract-text?name=letter.txt", content="Dear team, I built the scheduler.".encode())
     assert r.json() == {"text": "Dear team, I built the scheduler."}
-    assert c.post("/api/extract-text?name=scan.pdf", content=b"not a pdf").status_code == 422
+    r = c.post("/api/extract-text?name=scan.pdf", content=b"%PDF-1.4 cut short")  # what a file is goes by its bytes
+    assert r.status_code == 422 and "damaged" in r.json()["detail"] and r.json()["detail"].endswith("Or paste the text.")
+    assert c.post("/api/extract-text?name=letter.pdf", content=b"\x00\x01\x02 binary").status_code == 422
 
 
 def test_openings_come_from_the_cv(home, monkeypatch):
@@ -184,10 +186,25 @@ def test_openings_come_from_the_cv(home, monkeypatch):
     seen = {}
     fake = setup_api.Openings(openings=[{"style": s, "text": f"{s} opening"} for s in ("Direct", "Story", "Warm")])
     monkeypatch.setattr(ai, "chosen", lambda *a, **k: None)
-    monkeypatch.setattr(ai, "answer", lambda prompt, model, agent, timeout=600: seen.setdefault("prompt", prompt) and fake)
+    monkeypatch.setattr(ai, "answer", lambda prompt, model, agent, timeout=600, files=None: seen.setdefault("prompt", prompt) and fake)
     r = client().post("/api/suggest/openings", json={"tone": "friendly", "length": "short"})
     assert [o["style"] for o in r.json()["openings"]] == ["Direct", "Story", "Warm"]
     assert "Cared for 12 patients" in seen["prompt"] and "friendly" in seen["prompt"] and "<untrusted>" in seen["prompt"]
+
+
+def test_writing_helpers_learn_a_style_on_both_pages(home, monkeypatch):
+    """Setup step 6 and Profile › Writing share one part (parts/writing_helpers.html): a letter's voice becomes letter
+    instructions, and the letter's length is left to its own setting."""
+    seen = {}
+    style = pf.Style(markdown="# Letter instructions\n- Plain verbs\n\n## Banned phrases\n- synergy")
+    monkeypatch.setattr(ai, "chosen", lambda *a, **k: None)
+    monkeypatch.setattr(ai, "answer", lambda prompt, model, agent, timeout=600, files=None: seen.setdefault("prompt", prompt) and style)
+    c = client()
+    r = c.post("/api/suggest/style", json={"answers": {"source": "letters they wrote themselves"}, "sample": "Dear team, I built the ward rota."})
+    assert r.json()["markdown"] == style.markdown and "ward rota" in seen["prompt"] and "not its length" in seen["prompt"]
+    for page in ("setup", "profile"):
+        assert 'x-include="writing_helpers.html"' in c.get(f"/tabs/{page}.html").text, page
+    assert 'x-data="writingHelpers"' in c.get("/tabs/parts/writing_helpers.html").text
 
 
 def test_setup_missing_fresh_and_configured(home, monkeypatch):
@@ -249,12 +266,15 @@ def test_applied_jobs_never_show_or_get_a_second_application(home):
     k3 = posting.save({"url": "https://c.example/3", "title": "Data Analyst", "company": "Acme GmbH", "description": "d"})
     k4 = posting.save({"url": "https://d.example/4", "title": "Robotics Engineer", "company": "Beta AG", "description": "d"})
     k5 = posting.save({"url": "https://e.example/5", "title": "ML Innovation Engineer", "company": "Acme", "description": "d"})
+    k6 = posting.save({"url": "https://f.example/6", "title": "ML Engineer", "company": "Acme Tech Innovation", "description": "d"})
+    k7 = posting.save({"url": "https://g.example/7", "title": "ML Engineer", "company": "Gamma", "description": "d"})
     with db() as con:
         con.execute("insert into applications(job_key, company, role, date_applied, status) values (?, 'Acme GmbH', 'ML Engineer', '2026-10-01', 'applied')", (k1,))
         con.execute("insert into applications(job_key, company, role, date_applied, status) values ('x', 'Beta AG', 'Robotics Engineer', '2026-10-02', 'pending')")
         con.execute("update jobs set status='applied' where key=?", (k1,))
     keys = [r["key"] for r in client().get("/api/board?show=open").json()]
     assert k2 not in keys and k3 in keys and k4 in keys and k5 in keys  # twin hidden; other roles and saved-for-later stay
+    assert k6 not in keys and k7 in keys  # another name of the same employer hidden; another employer's same title stays
     assert client().get(f"/api/apply/{k2}").json()["applied"]["date_applied"] == "2026-10-01"
     try:
         apply.draft(k2)
@@ -311,18 +331,23 @@ def test_board_notes_applied_count_and_missed_postings(home, monkeypatch):
 
 
 def test_asked_missing_counts_keywords_the_cv_lacks(home):
+    """The skills postings asked for that the person doesn't have, matched as the fit score matches them (the skill map):
+    "KI" in "parking" is no ask; an older application without its posting counts by its keyword list."""
     from jobgambit.core import check
     from jobgambit.core.data import home as data_home
     master = pf.folder() / pf.FILES["profile"]
     master.parent.mkdir(parents=True, exist_ok=True)
-    master.write_text("skills: [Python, ROS 2]", encoding="utf-8")
-    for i, kws in enumerate([["Python", "Kubernetes", "Rust"], ["Kubernetes", "ROS 2"]]):
+    master.write_text("skills: {Tools: [Python, ROS 2]}", encoding="utf-8")
+    pf.write("skill_map", {"concepts": [{"id": i, "kind": "tool", "name": n, "aliases": a, "implied_by": []} for i, n, a in
+                                        [("k8s", "Kubernetes", ["K8s"]), ("rust", "Rust", []), ("ai", "AI", ["KI"])]]})
+    postings = ["Your profile\nPython\nKubernetes (K8s)\nRust", "Your profile\nK8s and ROS 2\nFree parking"]
+    for i, text in enumerate(postings):
         d = data_home() / "applications" / f"app{i}"
         d.mkdir(parents=True)
-        (d / "fit.json").write_text(json.dumps({"keywords": kws}), encoding="utf-8")
+        (d / "posting.md").write_text(text, encoding="utf-8")
     (data_home() / "applications" / "old").mkdir()
     (data_home() / "applications" / "old" / "job.yaml").write_text("keywords: [Rust, Kubernetes]\n", encoding="utf-8")
-    assert check.asked_missing() == [("kubernetes", 3), ("rust", 2)]
+    assert check.asked_missing() == [("Kubernetes", 3), ("Rust", 2)]
 
 
 def test_source_that_finds_nothing_three_times_sends_one_alert(home, monkeypatch):

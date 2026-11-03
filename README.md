@@ -183,7 +183,7 @@ Tip: turn off "use my chats for training" in your AI account's privacy settings.
 - **Company career sites:** Greenhouse, Lever, Ashby, Workday, SmartRecruiters, SAP SuccessFactors, Personio,
   Recruitee, Workable, Teamtailor, Breezy, BambooHR, JOIN and plain career pages, learned automatically.
 - **Germany pack:** Bundesagentur für Arbeit, StepStone, Arbeitnow, service.bund.de, karriere.nrw, research institutes
-  (Fraunhofer, DLR), universities (TUM, TU Berlin, TU Dresden, FAU, TU Braunschweig, Uni Bonn) and the stellenwerk
+  (Fraunhofer, DLR), universities (TU Berlin, TU Dresden, FAU, TU Braunschweig, Uni Bonn) and the stellenwerk
   student-job boards of ten university cities.
 
 Every source can be switched off in Settings. More countries can be added as a country pack:
