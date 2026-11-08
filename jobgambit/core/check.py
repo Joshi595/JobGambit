@@ -158,11 +158,11 @@ def asked_missing(n: int = 15) -> list[tuple[str, int]]:
     return count.most_common(n)
 
 
-def filled(pdf) -> float:
-    """How much of page 1's text area its text covers, top line to bottom line (0..1), taking the bottom margin as wide
-    as the top one."""
+def filled(pdf, n: int = 0) -> float:
+    """How much of a page's text area its text covers, top line to bottom line (0..1), taking the bottom margin as wide
+    as the top one. n: which page (-1, the last)."""
     from pypdf import PdfReader
-    page, ys = PdfReader(pdf).pages[0], []
+    page, ys = PdfReader(pdf).pages[n], []
     h = float(page.mediabox.height)
 
     def v(text, cm, tm, font, size):

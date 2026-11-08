@@ -55,6 +55,11 @@ document.addEventListener("alpine:init", () => {
     },
     doc(r, kind) { return r.files.find(f => f.includes(kind === "cv" ? "_CV_" : "Cover_Letter")); },
     openFolder(r) { api(`/api/applications/${r.id}/folder`, { method: "POST" }).catch(e => Alpine.store("toast").show(e.message, "bad")); },
+    async applyMyself(r) {  // the Apply page at its Documents step; "I applied" there marks this same row sent
+      try { const { key } = await api(`/api/applications/${r.id}/reopen`, { method: "POST" });
+            this.$refs.drawer.close(); Alpine.store("app").applyKey = key; Alpine.store("app").show("apply"); }
+      catch (e) { Alpine.store("toast").show(e.message, "bad"); }
+    },
     file(r, name) { return fileUrl(`applications/${r.folder}/${name}`); },
     show(r) { this.cur = r; this.posting = null; this.full = false; this.$refs.drawer.showModal(); this.loadPosting(r); },
     interviewing(r) { return ["interview", "assessment", "offer"].includes(r.status); },

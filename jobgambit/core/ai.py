@@ -6,6 +6,7 @@ with JSON matching a pydantic model. The app validates the answer and retries on
 import glob
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -20,7 +21,6 @@ LIMIT = re.compile(r"usage limit|session limit|weekly limit|hit your \S+ limit|\
                    r"too many requests", re.I)
 SIGNED_OUT = re.compile(r"not (?:signed|logged) in|log ?in\b|sign ?in\b|api key|unauthori[sz]ed|\b401\b|"
                         r"(?:token|session|login) (?:has )?expired", re.I)
-WRITE_STEPS = {"Tailor", "Change", "Revision"}  # answer models (by class name) that write the CV and letter themselves
 NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 PICTURES = frozenset({".png", ".jpg", ".gif", ".webp"})
 
@@ -31,6 +31,10 @@ class AIError(Exception):
 
 class UsageLimit(AIError):
     """The person's plan limit is reached; the queue should wait for the reset."""
+
+
+class BrowserPaused(AIError):
+    """The browser guard saved a stalled tab. Submission state must be checked before another send."""
 
 
 def problem(agent, said: str) -> AIError:
@@ -114,7 +118,7 @@ class Agent:
 
 
     def call(self, args: list[str], prompt: str, timeout: int, step: str, key: str, env: dict | None = None, cwd: str | None = None,
-             mode: str = "") -> str:
+             mode: str = "", pause_file: str = "") -> str:
         """One CLI call, recorded in the ai_calls ledger whatever happens (a failed call uses plan limits too). Output that
         isn't valid UTF-8 is read anyway; an error says what the CLI said, as its own result line says it (Claude)."""
         start, out, err = time.time(), "", ""
@@ -123,11 +127,30 @@ class Agent:
                                  encoding="utf-8", errors="replace", creationflags=NO_WINDOW,
                                  env={**os.environ, **env} if env else None, cwd=cwd)
             try:
-                out, stderr = p.communicate(prompt, timeout=timeout)
-            except subprocess.TimeoutExpired:
+                if not pause_file:
+                    out, stderr = p.communicate(prompt, timeout=timeout)
+                else:
+                    first, deadline = True, time.monotonic() + timeout
+                    while True:
+                        try:
+                            out, stderr = p.communicate(prompt if first else None, timeout=min(1, max(0.01, deadline - time.monotonic())))
+                            break
+                        except subprocess.TimeoutExpired:
+                            first = False
+                            if os.path.isfile(pause_file):
+                                out, err = stop(p), "Browser paused after repeated failures without progress"
+                                raise BrowserPaused(err)
+                            if time.monotonic() >= deadline:
+                                raise
+            except subprocess.TimeoutExpired as e:
                 out, err = stop(p), f"no answer within {timeout} s"
+                if not out and e.output:
+                    out = e.output.decode("utf-8", errors="replace") if isinstance(e.output, bytes) else e.output
                 raise AIError(f"{self.label} didn't answer within {timeout} seconds. Try again; if that happens again, "
                               "check it with Help › Test.")
+            if pause_file and os.path.isfile(pause_file):
+                err = "Browser paused after repeated failures without progress"
+                raise BrowserPaused(err)
             if p.returncode or not out.strip():
                 err = self.failed(out) or (stderr or out).strip()[-500:] or "no answer"
                 raise problem(self, err)
@@ -137,7 +160,18 @@ class Agent:
             raise AIError(f"{self.label} couldn't be started ({e}). Install it again (Help shows how), then press "
                           "Check again.") from e
         finally:
-            record(step, key, self, out, time.time() - start, err, prompt=prompt, mode=mode)
+            system_prompt = ""
+            try:
+                if "--system-prompt-file" in args:
+                    with open(args[args.index("--system-prompt-file") + 1], encoding="utf-8") as f:
+                        system_prompt = f.read()
+                elif "--system-prompt" in args:
+                    system_prompt = args[args.index("--system-prompt") + 1]
+            except (OSError, IndexError):
+                logging.getLogger(__name__).warning("Could not capture AI system prompt")
+            schema_chars = len(args[args.index("--json-schema") + 1]) if "--json-schema" in args else 0
+            record(step, key, self, out, time.time() - start, err, prompt=prompt, mode=mode,
+                   system_prompt=system_prompt, schema_chars=schema_chars)
 
     def run(self, prompt: str, schema: dict, timeout: int = 600, step: str = "", key: str = "", files: dict | None = None) -> dict:
         """files: {name: bytes} put in the run's folder for the AI to read itself (only the kinds it reads)."""
@@ -176,14 +210,15 @@ class Claude(Agent):
 
     def command(self, schema, step="", folder=""):
         # No tools, no MCP, none of the person's own settings, a one-line system prompt (the playbook carries the
-        # instructions): one lean model call. Standard writes the documents on Opus (it wrote better CVs and letters in a
-        # blind comparison) and runs every other step on Sonnet (half the price); premium is Opus throughout.
+        # instructions): one lean model call. Standard is Sonnet throughout, the CV and letter too: with the CV rules of
+        # 2026-11-06 a blind comparison found them as good as Opus's (5 ties of 5) at 56% less. Premium is Opus throughout.
         # A file to read (a scanned CV) in its folder: the Read tool only, which reads nothing outside that folder unasked.
-        model = {"economy": "haiku", "premium": "opus"}.get(self.level) or ("opus" if step in WRITE_STEPS else "sonnet")
+        model = {"economy": "haiku", "premium": "opus"}.get(self.level) or "sonnet"
         tools = "Read" if folder and os.listdir(folder) else ""
-        return ["-p", "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(schema), "--tools", tools,
+        effort = ["--effort", "medium"] if step in {"Review", "Change", "Fill"} else []
+        return ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--json-schema", json.dumps(schema), "--tools", tools,
                 "--system-prompt", "Answer only with JSON matching the given schema.",
-                "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", "--model", model]
+                "--strict-mcp-config", "--setting-sources", "", "--no-session-persistence", *effort, "--model", model]
 
     def extract(self, stdout):
         out = result(stdout)
@@ -200,46 +235,119 @@ class Claude(Agent):
         models = r.get("modelUsage") or {}
         if not models and not steps:
             return {}
-        sums = {k: sum(s[k] for s in steps) for k in ("fresh", "cache_write", "cached", "output", "thinking")}
-        if models:  # the CLI's totals, of the model that answered (the costliest); its own Haiku pass only adds to the cost
-            name, main = max(models.items(), key=lambda m: m[1].get("costUSD", 0))
-            sums.update(fresh=main.get("inputTokens", 0), cache_write=main.get("cacheCreationInputTokens", 0),
-                        cached=main.get("cacheReadInputTokens", 0), output=main.get("outputTokens", 0))
-            cost = round(sum(m.get("costUSD", 0) for m in models.values()), 4)
+        sums = {k: sum(s[k] or 0 for s in steps) for k in ("fresh", "cache_write", "cached", "output", "thinking")}
+        if not steps or any(s["thinking"] is None for s in steps):
+            sums["thinking"] = None
+        if models:
+            name = max(models, key=lambda m: models[m].get("costUSD") or 0)
+            sums.update({k: sum(v.get(field, 0) for v in models.values()) for k, field in
+                         (("fresh", "inputTokens"), ("cache_write", "cacheCreationInputTokens"),
+                          ("cached", "cacheReadInputTokens"), ("output", "outputTokens"))})
+            final_usage = r.get("usage") if isinstance(r.get("usage"), dict) else {}
+            thinking = (final_usage.get("output_tokens_details") or {}).get("thinking_tokens")
+            model_thinking = [v.get("thinkingTokens") for v in models.values()]
+            if all(v is not None for v in model_thinking):
+                sums["thinking"] = sum(model_thinking)
+            elif thinking is not None:
+                sums["thinking"] = thinking
+            cost = r.get("total_cost_usd")
+            if cost is None and all(v.get("costUSD") is not None for v in models.values()):
+                cost = sum(v["costUSD"] for v in models.values())
         else:  # a run cut short: what its finished API calls reported
-            name, cost = steps[-1]["model"], 0
-        return {"model": name, "input": sums["fresh"] + sums["cache_write"] + sums["cached"], **sums, "cost_usd": cost,
+            name, cost = steps[-1]["model"], r.get("total_cost_usd")
+        cache_5m = sum(v.get("cacheCreationEphemeral5mInputTokens", 0) for v in models.values()) if models else sum(s["cache_5m"] for s in steps)
+        cache_1h = sum(v.get("cacheCreationEphemeral1hInputTokens", 0) for v in models.values()) if models else sum(s["cache_1h"] for s in steps)
+        return {"model": name, "input": sums["fresh"] + sums["cache_write"] + sums["cached"], **sums,
+                "cost_usd": round(cost, 6) if cost is not None else None,
+                "usage_status": "complete" if models and sums["thinking"] is not None else "partial", "cost_status": "reported" if cost is not None else "unknown",
+                "cache_5m": cache_5m, "cache_1h": cache_1h, "api_calls": len(steps),
                 "turns": r.get("num_turns") or len(steps), "api_seconds": round((r.get("duration_api_ms") or 0) / 1000, 1),
                 "models": {m: {"in": v.get("inputTokens", 0), "cache_write": v.get("cacheCreationInputTokens", 0),
                                "cached": v.get("cacheReadInputTokens", 0), "out": v.get("outputTokens", 0),
-                               "cost": v.get("costUSD", 0)} for m, v in models.items()}}
+                               "thinking": v.get("thinkingTokens"), "cache_5m": v.get("cacheCreationEphemeral5mInputTokens"),
+                               "cache_1h": v.get("cacheCreationEphemeral1hInputTokens"), "cost": v.get("costUSD")} for m, v in models.items()}}
 
     def steps(self, stdout):
         """One entry per API call of a stream-json run: its tokens, the tools it called, and result_chars, the size of
         the tool results it read (what a page snapshot cost)."""
-        out, by_id, pending = [], {}, 0
+        out, by_id, pending, active, deltas = [], {}, 0, {}, set()
+
+        def update(s, u):
+            for key, field in (("fresh", "input_tokens"), ("cache_write", "cache_creation_input_tokens"),
+                               ("cached", "cache_read_input_tokens"), ("output", "output_tokens")):
+                if field in u:
+                    s[key] = max(s[key], u[field] or 0)
+            thinking = (u.get("output_tokens_details") or {}).get("thinking_tokens")
+            if thinking is not None:
+                s["thinking"] = max(s["thinking"] or 0, thinking)
+            split = u.get("cache_creation") or {}
+            for key, field in (("cache_5m", "ephemeral_5m_input_tokens"), ("cache_1h", "ephemeral_1h_input_tokens")):
+                s[key] = max(s[key], split.get(field) or 0)
+
+        def entry(mid, model, u):
+            nonlocal pending
+            if mid and mid in by_id:
+                s = by_id[mid]
+            else:
+                s = {"n": len(out) + 1, "message_id": mid or "", "model": model, "tools": [], "result_chars": pending,
+                     **{k: 0 for k in ("fresh", "cache_write", "cached", "output", "thinking", "cache_5m", "cache_1h")},
+                     "usage_status": "partial"}
+                s["thinking"] = None
+                out.append(s)
+                pending = 0
+                if mid:
+                    by_id[mid] = s
+            update(s, u)
+            return s
+
         for r in lines(stdout):
+            if r.get("type") == "stream_event":
+                event = r.get("event") or {}
+                lane = r.get("parent_tool_use_id") or "main"
+                if event.get("type") == "message_start":
+                    m = event.get("message") or {}
+                    active[lane] = entry(m.get("id"), m.get("model", ""), m.get("usage") or {})
+                elif event.get("type") == "message_delta" and lane in active:
+                    update(active[lane], event.get("usage") or {})
+                    if "output_tokens" in (event.get("usage") or {}):
+                        deltas.add(active[lane]["n"])
+                elif event.get("type") == "message_stop" and lane in active:
+                    s = active.pop(lane)
+                    if s["n"] in deltas and s["thinking"] is not None:
+                        s["usage_status"] = "complete"
+                continue
             msg = r.get("message") if isinstance(r.get("message"), dict) else {}
             blocks = [b for b in msg.get("content") or [] if isinstance(b, dict)] if isinstance(msg.get("content"), list) else []
             if r.get("type") == "assistant" and msg.get("usage"):
                 tools = [b.get("name", "") for b in blocks if b.get("type") == "tool_use"]
-                if msg.get("id") in by_id:  # one API answer can arrive as several lines, each with the same id and usage
-                    by_id[msg["id"]]["tools"] += tools
-                    continue
-                u = msg["usage"]
-                s = {"n": len(out) + 1, "model": msg.get("model", ""), "tools": tools, "result_chars": pending,
-                     "fresh": u.get("input_tokens") or 0, "cache_write": u.get("cache_creation_input_tokens") or 0,
-                     "cached": u.get("cache_read_input_tokens") or 0, "output": u.get("output_tokens") or 0,
-                     "thinking": (u.get("output_tokens_details") or {}).get("thinking_tokens") or 0}
-                if msg.get("id"):
-                    by_id[msg["id"]] = s
-                out.append(s)
-                pending = 0
+                s = entry(msg.get("id"), msg.get("model", ""), msg["usage"])
+                s["tools"] = list(dict.fromkeys(s["tools"] + tools))
             elif r.get("type") == "user":
                 for b in blocks:
                     if b.get("type") == "tool_result":
                         c = b.get("content")
                         pending += len(c) if isinstance(c, str) else sum(len(x.get("text") or "") for x in c or [] if isinstance(x, dict))
+        # Old logs have only preliminary assistant usage. A model with exactly one message can be recovered exactly;
+        # multiple messages can only be declared complete when their totals already reconcile. Never spread a residual.
+        completed = result(stdout)
+        for model, totals in (completed.get("modelUsage") or {}).items():
+            group = [s for s in out if s["model"] == model]
+            fields = {"fresh": "inputTokens", "cache_write": "cacheCreationInputTokens", "cached": "cacheReadInputTokens", "output": "outputTokens"}
+            if len(group) == 1:
+                for key, field in fields.items():
+                    group[0][key] = totals.get(field, 0)
+                if "thinkingTokens" in totals:
+                    group[0]["thinking"] = totals["thinkingTokens"]
+                elif len(completed.get("modelUsage") or {}) == 1:
+                    final_usage = completed.get("usage") or {}
+                    if isinstance(final_usage, dict):
+                        group[0]["thinking"] = (final_usage.get("output_tokens_details") or {}).get("thinking_tokens", group[0]["thinking"])
+                group[0]["cache_5m"] = totals.get("cacheCreationEphemeral5mInputTokens", group[0]["cache_5m"])
+                group[0]["cache_1h"] = totals.get("cacheCreationEphemeral1hInputTokens", group[0]["cache_1h"])
+                group[0]["usage_status"] = "complete" if group[0]["thinking"] is not None else "partial"
+            elif group and all(s["thinking"] is not None for s in group) and all(sum(s[key] for s in group) == totals.get(field, 0) for key, field in fields.items()):
+                for s in group:
+                    s["usage_status"] = "complete"
         return out
 
 
@@ -417,11 +525,12 @@ def result(out: str) -> dict:
     return next((r for r in reversed(lines(out)) if r.get("type") in ("result", None)), {})
 
 
-def record(step, key, agent, out, seconds, error="", prompt="", mode="", outcome="", batch=""):
+def record(step, key, agent, out, seconds, error="", prompt="", mode="", outcome="", batch="", system_prompt="", schema_chars=0):
     """agent: the Agent (or its name, then without token numbers); out: the CLI's output; prompt: what was sent.
     The prompt's part sizes come from the last prompts.build() in this thread."""
     from jobgambit.core import prompts
     parts, prompts.LAST.parts = getattr(prompts.LAST, "parts", None), None  # one prompt's parts never stick to the next
+    repair_reason, prompts.LAST.repair_reason = getattr(prompts.LAST, "repair_reason", ""), ""
     try:
         from jobgambit.core.data import db
         real = out and not isinstance(agent, str)
@@ -429,25 +538,33 @@ def record(step, key, agent, out, seconds, error="", prompt="", mode="", outcome
         error = error or (agent.failed(out) if real else "")
         answer = result(out).get("structured_output") if real else None
         outcome = outcome or str((answer or {}).get("status") or "" if isinstance(answer, dict) else "") or ("error" if error else "ok")
+        values = {"step": step, "job_key": key, "agent": agent if isinstance(agent, str) else agent.name,
+                  "model": u.get("model", ""), **{k: u.get(k, 0) for k in
+                  ("input", "fresh", "cache_write", "cached", "output", "thinking", "turns", "api_seconds", "cache_5m", "cache_1h", "api_calls")},
+                  "cost_usd": u.get("cost_usd", 0 if isinstance(agent, str) else None),
+                  "usage_status": u.get("usage_status", "not_applicable" if isinstance(agent, str) else "unknown"),
+                  "cost_status": u.get("cost_status", "reported" if isinstance(agent, str) else "unknown"),
+                  "seconds": round(seconds, 1), "error": error, "prompt_chars": len(prompt or "") + len(system_prompt or ""),
+                  "system_chars": len(system_prompt or ""), "user_chars": len(prompt or ""), "schema_chars": schema_chars,
+                  "parts": json.dumps(parts) if parts else None, "models": json.dumps(u["models"]) if u.get("models") else None,
+                  "mode": mode, "outcome": outcome, "batch": batch or BATCH, "repair_reason": repair_reason}
         with db() as con:
-            call = con.execute(
-                "insert into ai_calls(step, job_key, agent, model, input, cached, output, cost_usd, seconds, error, fresh, cache_write,"
-                " thinking, turns, api_seconds, prompt_chars, parts, models, mode, outcome, batch) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (step, key, agent if isinstance(agent, str) else agent.name, u.get("model", ""), u.get("input", 0),
-                 u.get("cached", 0), u.get("output", 0), u.get("cost_usd", 0), round(seconds, 1), error, u.get("fresh", 0),
-                 u.get("cache_write", 0), u.get("thinking", 0), u.get("turns", 0), u.get("api_seconds", 0), len(prompt or ""),
-                 json.dumps(parts) if parts else None, json.dumps(u["models"]) if u.get("models") else None, mode, outcome,
-                 batch or BATCH)).lastrowid
-            con.executemany("insert into ai_steps(call_id, n, tools, result_chars, fresh, cache_write, cached, output, thinking)"
-                            " values (?,?,?,?,?,?,?,?,?)", [(call, s["n"], ",".join(s["tools"]), s["result_chars"], s["fresh"],
-                                                            s["cache_write"], s["cached"], s["output"], s["thinking"]) for s in steps])
-            if out or prompt:
-                con.execute("update ai_calls set log=? where id=?", (write_log(call, prompt, out), call))
-    except Exception:
-        pass  # the ledger is a bonus: it never breaks an AI step
+            call = con.execute(f"insert into ai_calls({','.join(values)}) values ({','.join('?' for _ in values)})", tuple(values.values())).lastrowid
+            save_steps(con, call, steps)
+            if out or prompt or system_prompt:
+                con.execute("update ai_calls set log=? where id=?", (write_log(call, prompt, out, system_prompt), call))
+    except Exception as e:
+        # A broken ledger must be visible, but must never turn a successful send into a retry.
+        logging.getLogger(__name__).warning("AI usage could not be recorded (%s)", type(e).__name__)
 
 
-def write_log(call: int, prompt: str, out: str) -> str:
+def save_steps(con, call, steps):
+    fields = ("n", "result_chars", "fresh", "cache_write", "cached", "output", "thinking", "model", "message_id", "usage_status", "cache_5m", "cache_1h")
+    con.executemany(f"insert into ai_steps(call_id,tools,{','.join(fields)}) values ({','.join('?' for _ in range(len(fields) + 2))})",
+                    [(call, ",".join(s["tools"]), *(s[k] for k in fields)) for s in steps])
+
+
+def write_log(call: int, prompt: str, out: str, system_prompt: str = "") -> str:
     """<data>/logs/ai/<day>/<call>.prompt.txt and .jsonl: what was sent and all the CLI said, to work out later where
     tokens went. Kept LOG_DAYS days; never sent anywhere. Returns the log's path in the data folder ('' if not written)."""
     try:
@@ -457,6 +574,8 @@ def write_log(call: int, prompt: str, out: str) -> str:
         day = root / date.today().isoformat()
         day.mkdir(parents=True, exist_ok=True)
         (day / f"{call}.prompt.txt").write_text(secrets.redact(prompt or ""), encoding="utf-8", newline="")
+        if system_prompt:
+            (day / f"{call}.system.txt").write_text(secrets.redact(system_prompt), encoding="utf-8", newline="")
         (day / f"{call}.jsonl").write_text(secrets.redact(out or ""), encoding="utf-8", newline="")
         cutoff = (date.today() - timedelta(days=LOG_DAYS)).isoformat()
         for d in root.iterdir():

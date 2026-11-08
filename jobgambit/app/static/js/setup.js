@@ -289,10 +289,10 @@ document.addEventListener("alpine:init", () => {
   // Your documents (setup step 4, Profile › Application details): certificates, transcripts, references… kept in the
   // upload folder, next to the CV and letter of the application open at the moment.
   Alpine.data("uploadDocs", () => ({
-    folder: "", docs: [], err: "",
+    folder: "", docs: [], current: [], err: "",
     async init() { await this.load(); },
     async load() {
-      try { const r = await api("/api/upload-folder"); this.folder = r.folder; this.docs = r.documents; } catch (e) { this.err = e.message; }
+      try { const r = await api("/api/upload-folder"); this.folder = r.folder; this.docs = r.documents; this.current = r.current || []; } catch (e) { this.err = e.message; }
     },
     async add(ev) {
       this.err = "";

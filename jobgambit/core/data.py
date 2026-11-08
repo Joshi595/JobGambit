@@ -3,6 +3,8 @@ import hashlib
 import os
 import sqlite3
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 # Each entry upgrades the database by one version (PRAGMA user_version). Append only, never edit.
@@ -79,6 +81,20 @@ MIGRATIONS = [
     create table if not exists ai_steps (call_id integer, n integer, tools text, result_chars integer, fresh integer,
                            cache_write integer, cached integer, output integer, thinking integer, primary key (call_id, n));
     """,
+    "alter table ai_calls add column usage_status text default 'unknown';",
+    "alter table ai_calls add column cost_status text default 'unknown';",
+    "alter table ai_calls add column cache_5m integer default 0;",
+    "alter table ai_calls add column cache_1h integer default 0;",
+    "alter table ai_calls add column system_chars integer default 0;",
+    "alter table ai_calls add column user_chars integer default 0;",
+    "alter table ai_calls add column schema_chars integer default 0;",
+    "alter table ai_calls add column api_calls integer default 0;",
+    "alter table ai_calls add column repair_reason text default '';",
+    "alter table ai_steps add column model text default '';",
+    "alter table ai_steps add column message_id text default '';",
+    "alter table ai_steps add column usage_status text default 'partial';",
+    "alter table ai_steps add column cache_5m integer default 0;",
+    "alter table ai_steps add column cache_1h integer default 0;",
 ]
 
 
@@ -111,7 +127,7 @@ def instance() -> str:
 
 
 def db() -> sqlite3.Connection:
-    con = sqlite3.connect(home() / "jobgambit.db")
+    con = sqlite3.connect(home() / "jobgambit.db", timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("pragma journal_mode=wal")  # the scheduler and the app may write at the same time
     version = con.execute("pragma user_version").fetchone()[0]
@@ -124,3 +140,24 @@ def db() -> sqlite3.Connection:
                     raise
             con.execute(f"pragma user_version={i}")
     return con
+
+
+def atomic_write(path: Path, content: str | bytes):
+    """Replace a complete file, keeping its old contents if writing/replacing fails."""
+    path = Path(path)
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content.encode("utf-8") if isinstance(content, str) else content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        for n in range(4):
+            try:
+                os.replace(name, path)
+                break
+            except PermissionError:
+                if n == 3:
+                    raise
+                time.sleep((0.05, 0.15, 0.35)[n])
+    finally:
+        Path(name).unlink(missing_ok=True)

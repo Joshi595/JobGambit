@@ -64,6 +64,7 @@ window.feature = name => !!Alpine.store("app").state?.features?.[name];  // feat
 document.addEventListener("alpine:init", () => {
   Alpine.store("app", {
     tab: "", sub: "", dirty: false, n: {}, state: null, draft: null, setupStep: 0, setupPhase: "", applyKey: "", practiceApp: "",
+    pageRequest: null, scrolls: {}, boardState: null,
     setupMode() { return this.state && !this.state.preferences.setup_done; },
     tabs() { return this.setupMode() ? ["setup", "help"] : MAIN_TABS; },
     groups() { return this.setupMode() ? [{ id: "setup", tabs: ["setup"] }, { id: "end", tabs: ["help"] }] : NAV; },
@@ -74,18 +75,31 @@ document.addEventListener("alpine:init", () => {
     },
     async refresh() { this.state = await api("/api/state"); },
     async counts() { try { this.n = await api("/api/counts"); } catch {} },
-    async show(tab, sub = "") {
+    async show(tab, sub = "", navigation = "push") {
       if (LINKS[tab]) [tab, sub] = LINKS[tab];
-      if (this.dirty && !confirm(t("unsaved"))) return;
+      if (!MAIN_TABS.includes(tab) && tab !== "setup" && tab !== "apply") return;
+      if (this.dirty && !confirm(t("unsaved"))) {
+        if (navigation === "none") history.pushState(null, "", "#" + this.tab + (this.sub ? "/" + this.sub : ""));
+        return;
+      }
+      this.scrolls[this.tab + "/" + this.sub] = scrollY;
+      this.pageRequest?.abort();
+      const request = this.pageRequest = new AbortController();
       this.dirty = false;
       this.tab = tab;
       this.sub = sub;
-      history.replaceState(null, "", "#" + tab + (sub ? "/" + sub : ""));
+      if (navigation !== "none") history[navigation === "replace" ? "replaceState" : "pushState"](null, "", "#" + tab + (sub ? "/" + sub : ""));
       document.getElementById("menu")?.close();
       this.counts();
       const view = document.getElementById("view");
-      const r = await fetch(`/tabs/${tab}.html`, { cache: "no-cache" });  // after an update: the new page, never a stale copy
-      view.innerHTML = r.ok ? await r.text() : `<div class="card muted">${t("soon")}</div>`;
+      try {
+        const r = await fetch(`/tabs/${tab}.html`, { cache: "no-cache", signal: request.signal });
+        const html = r.ok ? await r.text() : `<div class="card muted">${t("soon")}</div>`;
+        if (request.signal.aborted) return;
+        view.innerHTML = html;
+        view.focus({ preventScroll: true });
+        requestAnimationFrame(() => scrollTo(0, this.scrolls[tab + "/" + sub] || 0));
+      } catch (e) { if (e.name !== "AbortError") Alpine.store("toast").show(e.message, "bad"); }
     },
   });
   Alpine.store("toast", {
@@ -228,7 +242,11 @@ document.addEventListener("alpine:initialized", async () => {
   await app.refresh();
   applyTheme(app.state.preferences.theme);
   const [want, sub] = location.hash.slice(1).split("/");
-  app.show(app.tabs().includes(want) ? want : app.tabs()[0], app.tabs().includes(want) ? sub : "");
+  app.show(app.tabs().includes(want) ? want : app.tabs()[0], app.tabs().includes(want) ? sub : "", "replace");
+  addEventListener("popstate", () => {
+    const [tab, part = ""] = location.hash.slice(1).split("/");
+    app.show(tab || app.tabs()[0], part, "none");
+  });
   setInterval(() => app.counts(), 60000);
   const ping = () => api("/api/ping", { method: "POST" }).catch(() => {});
   ping();

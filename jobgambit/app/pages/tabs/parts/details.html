@@ -88,6 +88,11 @@
       <button type="button" class="btn ghost" @click="load()" x-text="t('docs.refresh')"></button>
     </div>
     <p class="msg bad small" role="alert" x-show="err" x-text="err"></p>
+    <p class="small" x-show="current.length" x-text="t('docs.current')"></p>
+    <p class="small muted" x-show="!current.length" x-text="t('docs.no_current')"></p>
+    <ul class="files" x-show="current.length" :aria-label="t('docs.current')">
+      <template x-for="d in current" :key="d"><li><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-file-text"/></svg><span x-text="d"></span></li></template>
+    </ul>
     <p class="small muted" x-show="!docs.length" x-text="t('docs.none')"></p>
     <ul class="files" x-show="docs.length" :aria-label="t('docs.title')">
       <template x-for="d in docs" :key="d"><li><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-file-text"/></svg><span x-text="d"></span></li></template>

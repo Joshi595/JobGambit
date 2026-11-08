@@ -11,11 +11,11 @@ from typing import Literal
 
 from babel import Locale
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap, CommentedSeq
 
-from jobgambit.core.data import home
+from jobgambit.core.data import atomic_write, home
 from jobgambit.core.score import experience_years
 
 
@@ -212,7 +212,7 @@ def read(kind: str):
 
 def write(kind: str, value):
     if kind in TEXTS:
-        (folder() / TEXTS[kind]).write_text(value, encoding="utf-8")
+        atomic_write(folder() / TEXTS[kind], value)
         return
     model = {"profile": Profile, "preferences": Preferences}.get(kind)
     if model:
@@ -224,7 +224,7 @@ def write(kind: str, value):
     old = y.load(path) if path.exists() else CommentedMap()
     buf = io.StringIO()
     y.dump(_merge(old, value), buf)
-    path.write_text(buf.getvalue(), encoding="utf-8")
+    atomic_write(path, buf.getvalue())
 
 
 def profile() -> Profile:

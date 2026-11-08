@@ -301,11 +301,16 @@ def ai_usage(days: int = 30):
         steps = [dict(r) for r in con.execute(
             "select step, count(*) calls, sum(error != '') failed, sum(input) input, sum(cached) cached, sum(output) output,"
             " sum(fresh) fresh, sum(cache_write) cache_write, sum(thinking) thinking, avg(nullif(turns, 0)) turns,"
-            " sum(cost_usd) cost_usd, avg(seconds) seconds from ai_calls where at >= datetime('now', ?)"
+            " sum(cost_usd) cost_usd, avg(seconds) seconds, sum(usage_status in ('partial','unknown')) incomplete,"
+            " sum(cost_status='unknown') unknown_costs, sum(cache_5m) cache_5m, sum(cache_1h) cache_1h,"
+            " sum(system_chars) system_chars, sum(user_chars) user_chars, sum(api_calls) api_calls"
+            " from ai_calls where at >= datetime('now', ?)"
             " group by step order by sum(input) + sum(output) desc", (since,))]
         app = dict(con.execute(  # applications actually made (not drafts left half-way)
-            "select count(distinct job_key) n, sum(input) input, sum(cached) cached, sum(output) output, sum(cost_usd) cost_usd"
-            " from ai_calls where job_key in (select job_key from applications) and at >= datetime('now', ?)", (since,)).fetchone())
+            "select count(distinct job_key) n, sum(input) input, sum(cached) cached, sum(output) output, sum(cost_usd) cost_usd,"
+            " sum(cost_status='unknown') unknown_costs, sum(usage_status in ('partial','unknown')) incomplete"
+            " from ai_calls where job_key in (select job_key from applications where status not in ('pending','withdrawn'))"
+            " and at >= datetime('now', ?)", (since,)).fetchone())
     return {"steps": steps, "apps": app}
 
 
@@ -341,21 +346,26 @@ def open_playbooks():
 async def delete_everything(request: Request):
     if (await request.json()).get("confirm") != "DELETE":
         raise HTTPException(422, "Type DELETE to confirm.")
+    remaining = []
     try:
         scheduler.disable()
-    except Exception:
-        pass
-    secrets.delete_all()
+    except Exception as e:
+        remaining.append({"path": "scheduled tasks", "reason": secrets.redact(str(e))})
+    try:
+        for name in secrets.delete_all():
+            remaining.append({"path": "password store: " + name, "reason": "Could not delete"})
+    except Exception as e:
+        remaining.append({"path": "password store", "reason": secrets.redact(str(e))})
     from jobgambit.core import apply
     for name in apply.placed():  # only the CV and letter the app put there: the person's own documents are theirs
         try:
             (apply.current() / name).unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as e:
+            remaining.append({"path": str(apply.current() / name), "reason": secrets.redact(str(e))})
     root = home()
     for item in root.iterdir():
         try:
             shutil.rmtree(item) if item.is_dir() else item.unlink()
-        except OSError:
-            pass  # e.g. the open database file; it's emptied on the next start
-    return {"ok": True}
+        except OSError as e:
+            remaining.append({"path": str(item), "reason": secrets.redact(str(e))})
+    return {"ok": not remaining, "remaining": remaining}

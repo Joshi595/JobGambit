@@ -10,6 +10,7 @@ from jobgambit.core import data
 INDEX = "__index__"  # names of every stored secret, so they can all be listed and deleted
 
 
+
 def _service() -> str:
     """"JobGambit", or "JobGambit-<id>" for a JOBGAMBIT_HOME (tests, scratch copies)."""
     i = data.instance()
@@ -52,15 +53,24 @@ def names() -> list[str]:
 
 
 def delete_all():
-    for name in _index():
+    failed = []
+    try:
+        names = json.loads(keyring.get_password(_service(), INDEX) or "[]")
+    except (keyring.errors.KeyringError, ValueError):
+        return ["password index unavailable"]
+    for name in names:
         try:
             keyring.delete_password(_service(), name)
-        except keyring.errors.PasswordDeleteError:
-            pass
+        except keyring.errors.KeyringError:
+            failed.append(name)
     try:
-        keyring.delete_password(_service(), INDEX)
-    except keyring.errors.PasswordDeleteError:
-        pass
+        if failed:
+            keyring.set_password(_service(), INDEX, json.dumps(failed))
+        else:
+            keyring.delete_password(_service(), INDEX)
+    except keyring.errors.KeyringError:
+        failed.append(INDEX)
+    return failed
 
 
 def redact(text: str) -> str:

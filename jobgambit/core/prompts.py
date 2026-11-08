@@ -34,4 +34,5 @@ def build(name: str, **parts: str) -> str:
             text += "\nTheir own note for every step (follow it where the facts allow): {instructions}\n"
         parts["instructions"] = parts["instructions"] or "(none)"
     LAST.parts = {"playbook": len(text), **{k: len(v) for k, v in parts.items()}}
+    LAST.repair_reason = parts.get("problems", "") if name == "change" else ""
     return re.sub(r"\{(\w+)\}", lambda m: parts.get(m[1], m[0]), text)

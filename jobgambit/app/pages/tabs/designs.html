@@ -100,6 +100,16 @@
             </template>
             <label class="field"><span x-text="t('designer.size')"></span><input type="range" min="9" max="12" step="0.1" x-model.number="style.size" @input="refresh()"></label>
             <label class="field"><span x-text="t('designer.spacing')"></span><input type="range" min="0.4" max="0.9" step="0.02" x-model.number="style.leading" @input="refresh()"></label>
+            <div class="field"><span x-text="t('designer.align')"></span>
+              <div class="seg" role="group" :aria-label="t('designer.align')">
+                <template x-for="[a, d] in Object.entries(ALIGN)" :key="a">
+                  <button type="button" :aria-pressed="(style.align || 'left') === a" :aria-label="t('designer.opt.' + a)" :title="t('designer.opt.' + a)"
+                          @click="style.align = a; refresh()">
+                    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path :d="d" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+                  </button>
+                </template>
+              </div>
+            </div>
             <label class="check wide"><input type="checkbox" x-model="style.group" @change="refresh()"><span x-text="t('designer.group')"></span></label>
           </div>
         </details>

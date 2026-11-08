@@ -70,6 +70,8 @@
                 <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-mail"/></svg>
                 <span x-text="(r.data.replies || []).length"></span><span class="sr-only" x-text="t('applications.replies')"></span>
               </span>
+              <button class="btn primary sm" x-show="r.status === 'pending' && r.job_key" @click="applyMyself(r)" :title="t('applications.apply_myself_d')">
+                <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg><span x-text="t('applications.apply_myself')"></span></button>
               <a class="btn ghost sm" x-show="doc(r, 'cv')" :href="file(r, doc(r, 'cv'))" target="_blank" :title="doc(r, 'cv')">
                 <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-file-text"/></svg><span x-text="t('applications.cv')"></span></a>
               <a class="btn ghost sm" x-show="doc(r, 'letter')" :href="file(r, doc(r, 'letter'))" target="_blank" :title="doc(r, 'letter')">
@@ -110,6 +112,8 @@
             <a class="btn sm" x-show="cur.data.url" :href="cur.data.url" target="_blank" rel="noopener">
               <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-external-link"/></svg><span x-text="t('applications.posting')"></span>
               <span class="sr-only" x-text="t('board.new_tab')"></span></a>
+            <button class="btn primary sm" x-show="cur.status === 'pending' && cur.job_key" @click="applyMyself(cur)" :title="t('applications.apply_myself_d')">
+              <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg><span x-text="t('applications.apply_myself')"></span></button>
             <a class="btn sm" x-show="doc(cur, 'cv')" :href="file(cur, doc(cur, 'cv'))" target="_blank" :title="doc(cur, 'cv')">
               <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-file-text"/></svg><span x-text="t('applications.cv')"></span></a>
             <a class="btn sm" x-show="doc(cur, 'letter')" :href="file(cur, doc(cur, 'letter'))" target="_blank" :title="doc(cur, 'letter')">
@@ -195,7 +199,7 @@
               <table class="usage">
                 <thead><tr><th x-text="t('apply.u_step')"></th><th x-text="t('apply.u_in')"></th><th x-text="t('apply.u_cached')"></th><th x-text="t('apply.u_out')"></th><th x-text="t('apply.u_cost')"></th></tr></thead>
                 <tbody><template x-for="u in [...cur.usage, usageTotal(cur.usage)]">
-                  <tr :class="u.total && 'total'"><td x-text="stepName(u.step) + (u.error ? ' ✗' : '')"></td><td x-text="kTok(u.input)"></td><td x-text="kTok(u.cached)"></td><td x-text="kTok(u.output)"></td><td x-text="'$' + (u.cost_usd ?? 0).toFixed(2)"></td></tr>
+                  <tr :class="u.total && 'total'" :title="u.usage_status"><td x-text="stepName(u.step) + (u.error ? ' ✗' : '') + (['partial','unknown'].includes(u.usage_status) ? ' ≳' : '')"></td><td x-text="kTok(u.input)"></td><td x-text="kTok(u.cached)"></td><td x-text="kTok(u.output)"></td><td x-text="usageCost(u)"></td></tr>
                 </template></tbody>
               </table>
               <p class="small muted" x-text="t('apply.u_note')"></p>

@@ -28,6 +28,7 @@ STYLE = {  # every design starts from these and overrides some
     "size": 10.5, "leading": 0.55, "margin_x": 1.7, "margin_y": 1.4, "accent": "#1F3A5F", "muted": "#555555",
     "side_fill": "#F1F3F6", "section_style": "rule", "bullet": "•", "date_pos": "right", "group": True,
     "skills_style": "lines", "languages_style": "text", "photo": "circle", "paper": "a4",
+    "align": "left",  # the body text (Profile, lines, letter paragraphs): left | center | right | justify
 }
 ORDER = ["summary", "experience", "projects", "education", "skills", "languages", "certifications", "awards",
          "publications", "volunteering", "courses", "custom", "interests"]

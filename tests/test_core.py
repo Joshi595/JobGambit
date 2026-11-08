@@ -54,10 +54,8 @@ def test_claude_extract():
 def test_claude_lean_call_and_main_model_tokens():
     c = ai.Claude()
     assert "--system-prompt" in c.command({}) and "stream-json" in c.command({}) and "--verbose" in c.command({})
-    assert c.command({}, "Tailor")[-2:] == ["--model", "opus"]  # standard: the documents themselves on Opus,
-    assert c.command({}, "Review")[-2:] == ["--model", "sonnet"]  # every other step on Sonnet, the CLI's default never
-    from jobgambit.core import apply
-    assert {apply.Tailor.__name__, apply.Change.__name__, apply.Revision.__name__} <= ai.WRITE_STEPS  # a rename can't move them
+    for step in ("Tailor", "Change", "Revision", "Review"):  # standard: Sonnet writes too (blind test 2026-11-06: 5 ties of 5)
+        assert c.command({}, step)[-2:] == ["--model", "sonnet"], step  # the CLI's default never
     c.level = "premium"
     assert c.command({}, "Tailor")[-2:] == ["--model", "opus"]
     c.level = "economy"
@@ -66,7 +64,7 @@ def test_claude_lean_call_and_main_model_tokens():
                                      "claude-opus-5-5": {"inputTokens": 100, "outputTokens": 5, "costUSD": 0.05}}})
     u = c.usage(out)
     assert {k: u[k] for k in ("model", "input", "cached", "output", "cost_usd")} == {
-        "model": "claude-opus-5-5", "input": 100, "cached": 0, "output": 5, "cost_usd": 0.051}
+        "model": "claude-opus-5-5", "input": 1000, "cached": 0, "output": 5, "cost_usd": 0.051}
 
 
 def stream(cut=False):
@@ -111,8 +109,8 @@ def test_record_writes_detail_parts_and_log():
     prompts.build("rules", facts="abc")
     ai.record("Submit", "k", ai.Claude(), stream(), 3.0, prompt="the prompt", mode="submit")
     r, steps = last_call()
-    assert (r["turns"], r["fresh"], r["cache_write"], r["cached"], r["output"], r["thinking"]) == (2, 15, 3400, 3000, 80, 30)
-    assert r["input"] == 6415 and r["api_seconds"] == 4.2 and r["prompt_chars"] == 10
+    assert (r["turns"], r["fresh"], r["cache_write"], r["cached"], r["output"], r["thinking"]) == (2, 315, 3400, 3000, 90, 30)
+    assert r["input"] == 6715 and r["api_seconds"] == 4.2 and r["prompt_chars"] == 10
     assert json.loads(r["parts"])["facts"] == 3 and "playbook" in json.loads(r["parts"])
     assert (r["mode"], r["outcome"]) == ("submit", "ok") and "claude-haiku-5-5" in json.loads(r["models"])
     assert [s["tools"] for s in steps] == ["mcp__pw__browser_navigate", ""] and steps[1]["result_chars"] == 1200

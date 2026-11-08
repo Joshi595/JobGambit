@@ -134,6 +134,7 @@ def job(title, company, location, url, source, posted="", desc="", country=""):
 # ---------------------------------------------------------------- liveness (career-ops liveness-core)
 EXPIRED = [r"diese stelle (ist )?(nicht mehr|bereits) (verfugbar|besetzt|vergeben|aktiv)",
            r"(stellenangebot|stellenanzeige) (ist )?nicht mehr (verfugbar|aktiv|online)",
+           r"\bjob nicht mehr verfugbar", r"stellenanzeige wurde nicht gefunden",
            r"bewerbungsfrist (ist )?(abgelaufen|vorbei)", r"no longer accepting applications",
            r"(job|position|posting|role|vacancy) (is )?no longer (available|open|active)",
            r"this (job|role|position|vacancy) (has been|is) closed", r"applications? (are|is|have been) closed",
@@ -151,7 +152,7 @@ def classify(status, text, url="", final_url=""):
     """(verdict, reason), verdict active | expired | uncertain. Unclear is never 'expired'."""
     if status in (404, 410):
         return "expired", f"HTTP {status}"
-    if re.search(r"error(page|type)?\W*=?\W*404|/404\b|not-?found|[?&]error=true", final_url.lower()):
+    if re.search(r"error(page|type)?\W*=?\W*404|/404\b|not-?found|nicht-mehr-verfuegbar|[?&]error=true", final_url.lower()):
         return "expired", f"redirected to an error page"
     job_id = re.search(r"\d{5,}", url)
     if final_url and job_id and job_id.group(0) not in final_url:

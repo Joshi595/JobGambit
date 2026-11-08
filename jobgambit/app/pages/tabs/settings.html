@@ -237,14 +237,14 @@
                   <th x-text="t('apply.u_cached')"></th><th x-text="t('apply.u_out')"></th><th x-text="t('apply.u_thinking')"></th>
                   <th x-text="t('settings.avg_turns')"></th><th x-text="t('apply.u_cost')"></th><th x-text="t('settings.avg_s')"></th></tr></thead>
                 <tbody><template x-for="s in [...(u?.steps || []), {...usageTotal(u?.steps || []), calls: (u?.steps || []).reduce((a, x) => a + x.calls, 0)}]">
-                  <tr :class="s.total && 'total'"><td x-text="stepName(s.step)"></td><td x-text="s.calls + (s.failed ? ' (' + s.failed + ' ✗)' : '')"></td>
+                  <tr :class="s.total && 'total'"><td x-text="stepName(s.step) + (s.incomplete ? ' ≳' : '')"></td><td x-text="s.calls + (s.failed ? ' (' + s.failed + ' ✗)' : '')"></td>
                     <td x-text="kTok(s.input)"></td><td x-text="kTok(s.fresh)"></td><td x-text="kTok(s.cache_write)"></td>
                     <td x-text="kTok(s.cached)"></td><td x-text="kTok(s.output)"></td><td x-text="kTok(s.thinking)"></td>
                     <td x-text="s.turns ? s.turns.toFixed(1) : ''"></td>
-                    <td x-text="'$' + (s.cost_usd || 0).toFixed(2)"></td><td x-text="s.seconds ? Math.round(s.seconds) : ''"></td></tr>
+                    <td x-text="usageCost(s)"></td><td x-text="s.seconds ? Math.round(s.seconds) : ''"></td></tr>
                 </template></tbody>
               </table>
-              <p class="small" x-show="u?.apps.n" x-text="u && t('settings.per_app', {n: u.apps.n, i: kTok(u.apps.input / u.apps.n), o: kTok(u.apps.output / u.apps.n), c: (u.apps.cost_usd / u.apps.n).toFixed(2)})"></p>
+              <p class="small" x-show="u?.apps.n" x-text="u && t('settings.per_app', {n: u.apps.n, i: kTok(u.apps.input / u.apps.n), o: kTok(u.apps.output / u.apps.n), c: (u.apps.cost_usd / u.apps.n).toFixed(2) + (u.apps.unknown_costs ? ' + ?' : '')})"></p>
               <p class="small muted" x-text="t('apply.u_note')"></p>
             </div>
           </div>

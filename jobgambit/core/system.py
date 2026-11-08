@@ -49,21 +49,27 @@ def open_terminal(cmd: list[str]):
         subprocess.Popen([term, "-e", shlex.join(cmd)])
 
 
-def backup() -> bytes:
-    """Zip of the data folder: a consistent copy of the database, no browser sessions, no logs."""
+def backup(destination: Path | None = None) -> bytes:
+    """Back up selected data, streaming an uncompressed ZIP when a destination is supplied."""
     root = home()
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z, tempfile.TemporaryDirectory() as tmp:
+    buf = destination if destination is not None else io.BytesIO()
+    compression = zipfile.ZIP_STORED if destination is not None else zipfile.ZIP_DEFLATED
+    with zipfile.ZipFile(buf, "w", compression) as z, tempfile.TemporaryDirectory() as tmp:
         if (root / "jobgambit.db").exists():
             snap = Path(tmp) / "jobgambit.db"
-            with sqlite3.connect(root / "jobgambit.db") as con:
+            with sqlite3.connect(root / "jobgambit.db", timeout=30) as con:
                 con.execute("vacuum into ?", (str(snap),))
             z.write(snap, "jobgambit.db")
-        for f in root.rglob("*"):
-            rel = f.relative_to(root)
-            if f.is_file() and rel.parts[0] not in ("browser", "runs", "uploads", "cache", "logs") and not f.name.startswith("jobgambit.db"):
-                z.write(f, rel.as_posix())
-    return buf.getvalue()
+        allowed = {"profile", "applications", "jobs", "sites", "designs", "playbooks", "portals", "work", "Current application", "current.json", "notes.txt"}
+        resolved_root = root.resolve()
+        for name in sorted(allowed):
+            entry = root / name
+            if entry.is_symlink() or resolved_root not in entry.resolve().parents:
+                continue
+            for f in entry.rglob("*") if entry.is_dir() else [entry]:
+                if f.is_file() and not f.is_symlink() and resolved_root in f.resolve().parents:
+                    z.write(f, f.relative_to(root).as_posix())
+    return b"" if destination is not None else buf.getvalue()
 
 
 REPO = "Joshi595/JobGambit"  # ponytail: GitHub release tags; PyPI (jobgambit==<version>) once the repo is public

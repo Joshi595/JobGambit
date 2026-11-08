@@ -15,6 +15,9 @@ Every line the documents show now (id (section): text):
 Problems the checks found:
 {problems}
 
+Repair scope and length target:
+{repair_scope}
+
 Their request:
 {request}
 

@@ -19,6 +19,13 @@
   parts.enumerate().map(((i, p)) => if calc.odd(i) { strong(p) } else { p }).join()
 }
 
+// The body text (Profile, the lines under each entry) as the person aligns it; headings and dates keep the design's.
+#let body(x) = {
+  set par(justify: s.align == "justify")
+  set align(if s.align == "center" { center } else if s.align == "right" { right } else { left })
+  x
+}
+
 #let title(t) = {
   set text(font: s.heading_font)
   if s.section_style == "rule" {
@@ -55,7 +62,7 @@
   ]
   #if e.bullets.len() > 0 {
     v(0.15em)
-    list(..e.bullets.map(md))
+    body(list(..e.bullets.map(md)))
   }
 ]
 
@@ -126,7 +133,7 @@
   else if sec.kind == "skills" { skills(sec, side) }
   else if sec.kind == "languages" { languages(sec, side) }
   else if sec.kind == "tags" { sec.items.join(", ") }
-  else if sec.kind == "text" { md(sec.items) }
+  else if sec.kind == "text" { body(md(sec.items)) }
 }
 
 #let photo(size) = if d.header.photo != none and s.photo != "none" {

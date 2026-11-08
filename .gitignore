@@ -12,3 +12,5 @@ Current application/*
 __pycache__/
 .pytest_cache/
 dist/
+.tmp-verified-*/
+.tmp-plan-direct-*/

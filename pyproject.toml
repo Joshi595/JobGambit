@@ -1,6 +1,6 @@
 [project]
 name = "jobgambit"
-version = "0.17.6"
+version = "0.18.4"
 description = "Find jobs and tailor your CV and cover letter with the AI plan you already have. Runs on your own computer."
 readme = "README.md"
 license = "MIT"
@@ -31,6 +31,9 @@ jobgambit-app = "jobgambit.app.server:main"
 
 [dependency-groups]
 dev = ["pytest>=8", "httpx2"]
+
+[tool.pytest.ini_options]
+filterwarnings = ["error::pytest.PytestUnhandledThreadExceptionWarning", "error::pytest.PytestUnraisableExceptionWarning"]
 
 [build-system]
 requires = ["hatchling"]

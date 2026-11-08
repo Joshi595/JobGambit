@@ -246,7 +246,7 @@
           <table class="usage">
             <thead><tr><th x-text="t('apply.u_step')"></th><th x-text="t('apply.u_in')"></th><th x-text="t('apply.u_cached')"></th><th x-text="t('apply.u_out')"></th><th x-text="t('apply.u_cost')"></th></tr></thead>
             <tbody><template x-for="u in [...usage, usageTotal(usage)]">
-              <tr :class="u.total && 'total'"><td x-text="stepName(u.step) + (u.error ? ' ✗' : '')"></td><td x-text="kTok(u.input)"></td><td x-text="kTok(u.cached)"></td><td x-text="kTok(u.output)"></td><td x-text="'$' + (u.cost_usd ?? 0).toFixed(2)"></td></tr>
+              <tr :class="u.total && 'total'" :title="u.usage_status"><td x-text="stepName(u.step) + (u.error ? ' ✗' : '') + (['partial','unknown'].includes(u.usage_status) ? ' ≳' : '')"></td><td x-text="kTok(u.input)"></td><td x-text="kTok(u.cached)"></td><td x-text="kTok(u.output)"></td><td x-text="usageCost(u)"></td></tr>
             </template></tbody>
           </table>
           <p class="small muted" x-text="t('apply.u_note')"></p>

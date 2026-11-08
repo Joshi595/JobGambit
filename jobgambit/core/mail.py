@@ -12,13 +12,14 @@ import mimetypes
 import re
 import smtplib
 import ssl
+import time
 import urllib.parse
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from jobgambit.core import secrets
 from jobgambit.core import profile as pf
-from jobgambit.core.data import db, home
+from jobgambit.core.data import atomic_write, db, home
 
 PROVIDERS = {  # imap host, smtp host, smtp port (465 = SSL, 587 = STARTTLS)
     "gmail": ("imap.gmail.com", "smtp.gmail.com", 465), "outlook": ("outlook.office365.com", "smtp.office365.com", 587),
@@ -47,7 +48,8 @@ SIGNALS = [  # first hit wins; specific phrases only: receipts say "unfortunatel
     ("rejected", r"other candidates|other applicants|not been selected|not selected|decided not to|decided against|"
                  r"move forward with other|chosen to move forward|pursue other|position has been filled|regret to (?:having to )?inform|"
                  r"(?:not (?:be )?able|unable) to (?:offer you|shortlist you|consider your|proceed with your)|not (?:be )?moving forward|"
-                 r"absagen|eine absage|anderweitig|nicht (?:weiter |mehr )?berücksichtig|anderen? (?:bewerber|kandidat)|"
+                 r"absagen|eine absage|(?:uns|sich|wir|stelle|position)\b[^.]{0,40}anderweitig|anderweitig (?:entschieden|besetzt|vergeben)|"
+                 r"nicht (?:weiter |mehr )?berücksichtig|anderen? (?:bewerber|kandidat)|"
                  r"nicht weiter verfolg|nicht in die engere|für eine?n? andere|nicht für (?:sie|dich) entschieden|"
                  r"andere bewerbungen vor|(?:stärker|besser) (?:entsprechen|passen)|nicht berücksichtigen|keine zusage|"
                  r"unsuccessful|not to proceed|will not be (?:moving|proceeding)|"
@@ -365,14 +367,16 @@ CAP = 1500  # mails per folder and check: an hourly check sees a day or two, one
 
 def _get(m, uid, thrid: bool) -> dict:
     """One mail as the checks read it."""
-    head, raw = m.uid("FETCH", uid, "(X-GM-THRID BODY.PEEK[])" if thrid else "(BODY.PEEK[])")[1][0]
+    head, raw = m.uid("FETCH", uid, "(INTERNALDATE X-GM-THRID BODY.PEEK[])" if thrid else "(INTERNALDATE BODY.PEEK[])")[1][0]
     thread = re.search(rb"X-GM-THRID (\d+)", head)
     msg = email.message_from_bytes(raw, policy=email.policy.default)
     frm, subject, body = str(msg["From"] or ""), " ".join(str(msg["Subject"] or "").split()), " ".join(_body(msg).split())
     sent = getattr(msg["Date"], "datetime", None)
+    received = imaplib.Internaldate2tuple(head)
     return {"id": str(msg["Message-ID"] or uid.decode()), "frm": frm, "subject": subject,
             "thread": format(int(thread[1]), "x") if thread else "",
             "date": sent.date().isoformat() if sent else date.today().isoformat(), "msg": msg, "snippet": body[:300],
+            "received_at": datetime.fromtimestamp(time.mktime(received), timezone.utc).isoformat() if received else "",
             "body": body[:4000], "head": f"{frm} {subject}".lower(), "text": f"{frm} {subject} {body}".lower()}
 
 
@@ -464,7 +468,7 @@ def _state() -> dict:
 
 
 def _save(st: dict):
-    (home() / "mail_state.json").write_text(json.dumps(st), encoding="utf-8")
+    atomic_write(home() / "mail_state.json", json.dumps(st))
 
 
 def record(con, row: dict, m: dict, signal: str, status: str | None = None, at: str = ""):
@@ -474,7 +478,8 @@ def record(con, row: dict, m: dict, signal: str, status: str | None = None, at: 
     replies = data.setdefault("replies", [])
     if not any(x.get("date") == m["date"] and x.get("subject") == m["subject"] for x in replies):  # read again: once
         was = {"was": row["status"]} if status and status != row["status"] else {}  # what "Wrong? Link it" puts back
-        replies.append({"date": m["date"], "from": m["frm"], "subject": m["subject"], "signal": signal or "", **was})
+        replies.append({"date": m["date"], "from": m["frm"], "subject": m["subject"], "signal": signal or "",
+                        "message_id": m.get("id", ""), "received_at": m.get("received_at", ""), **was})
     if m.get("thread"):
         data["thread"] = m["thread"]  # the latest conversation: My applications links to it
         data["threads"] = sorted({*data.get("threads", []), m["thread"]})
@@ -509,6 +514,8 @@ CLOSED = ["rejected", "withdrawn", "no_response", "ghosted"]
 def step(row: dict, signal) -> str | None:
     """The status a mail moves its application to: forward, or to rejected. A closed application that comes back is the
     person's call (the mail is open in Needs you)."""
+    if signal == "acknowledgement" and row["status"] in ("pending", "withdrawn"):  # kept as not sent, but it went out
+        return "applied"  # (join.com sends at its first step: NAIRON, 7 Nov)
     new = signal if signal in ("rejected", "offer", "interview", "assessment") else None
     if new and (row["status"] in CLOSED or new != "rejected" and STEPS.index(new) <= (STEPS + [row["status"]]).index(row["status"])):
         return None
@@ -804,20 +811,6 @@ def sweep() -> list[str]:
                 con.execute("update applications set status='no_response' where id=?", (r["id"],))
                 moved.append(r["company"])
     return moved
-
-
-def verification_links(domain: str, minutes: int = 60) -> list[str]:
-    """Links pointing at the portal's own domain in mails from the last hour: only those, so a mail can't steer elsewhere."""
-    base = ".".join(domain.lower().split(".")[-2:])
-    out = []
-    for m in fetch(date.today() - timedelta(days=1)):
-        when = getattr(m["msg"]["Date"], "datetime", None)
-        if when and when.timestamp() < datetime.now().timestamp() - minutes * 60:
-            continue
-        part = m["msg"].get_body(("html", "plain"))
-        urls = {html.unescape(u) for u in re.findall(r"https?://[^\s\"'<>]+", part.get_content() if part else "")}
-        out += [u for u in urls if (urllib.parse.urlsplit(u).hostname or "").endswith(base)]
-    return out
 
 
 

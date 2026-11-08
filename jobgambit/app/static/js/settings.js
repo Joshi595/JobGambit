@@ -48,7 +48,7 @@ document.addEventListener("alpine:init", () => {
     },
     groups() { return shownGroups(); },
     group() { return this.groups().includes(this.$store.app.sub) ? this.$store.app.sub : "search"; },
-    go(g) { this.$store.app.sub = g; history.replaceState(null, "", "#settings/" + g); },
+    go(g) { this.$store.app.sub = g; history.pushState(null, "", "#settings/" + g); },
     country(code) { return this.st.countries[code] || code; },
     save(key) { return patchPrefs({ [key]: Alpine.raw(this.p[key]) }); },
     saveList(key, text) { this.p[key] = csv(text); return this.save(key); },
@@ -127,7 +127,11 @@ document.addEventListener("alpine:init", () => {
     },
     async deleteAll() {
       if (this.confirm !== "DELETE") return;
-      await api("/api/delete-everything", { json: { confirm: "DELETE" } });
+      const result = await api("/api/delete-everything", { json: { confirm: "DELETE" } });
+      if (!result.ok) {
+        Alpine.store("toast").show(result.remaining.map(x => x.path + ': ' + x.reason).join('; '), "bad");
+        return;
+      }
       await api("/api/quit", { method: "POST" });
       document.body.innerHTML = `<main><div class="card">${t("settings.deleted")}</div></main>`;
     },

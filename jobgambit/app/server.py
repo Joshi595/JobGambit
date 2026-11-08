@@ -18,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from jobgambit.app import apply_api, jobs_api, mail_api, practice_api, settings_api, setup_api
 from jobgambit.app.jobs_api import OPEN
-from jobgambit.core import ai, data, system
+from jobgambit.core import ai, data, system, secrets as vault
 from jobgambit.core import profile as pf
 
 HERE = Path(__file__).parent
@@ -51,11 +51,11 @@ async def unexpected(request: Request, e: Exception):
         log = data.home() / "app.log"
         mode = "w" if log.exists() and log.stat().st_size > 1_000_000 else "a"  # starts over past 1 MB
         with open(log, mode, encoding="utf-8") as f:
-            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {request.method} {request.url.path}\n"
-                    f"{''.join(traceback.format_exception(e))}\n")
+            f.write(vault.redact(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {request.method} {request.url.path}\n"
+                                f"{''.join(traceback.format_exception(e))}\n"))
     except OSError:
         pass
-    return JSONResponse({"detail": f"Something went wrong ({type(e).__name__}: {str(e)[:300]}). Try again; if that happens "
+    return JSONResponse({"detail": f"Something went wrong ({type(e).__name__}: {vault.redact(str(e))[:300]}). Try again; if that happens "
                                    "again, copy a problem report in Help and open an issue with it."}, status_code=500)
 
 
@@ -252,13 +252,19 @@ def upkeep(after: str = ""):
             pass  # upkeep never stops the app or a run
 
 
+def background_busy() -> bool:
+    from jobgambit.core import search
+    busy = search.BUSY.is_set()
+    return busy
+
+
 def watchdog():
     """Stop when no page has pinged for a while: closing the browser tab ends the app, though never in the middle of a
     full re-judge of the stored postings (0.17's first one was cut off that way, 2026-10-31)."""
     from jobgambit.core import search
     while SERVER and not SERVER.should_exit:
         time.sleep(15)
-        if last_ping and time.time() - last_ping > IDLE_EXIT and not search.BUSY.is_set():
+        if last_ping and time.time() - last_ping > IDLE_EXIT and not background_busy():
             SERVER.should_exit = True
 
 

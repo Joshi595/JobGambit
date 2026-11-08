@@ -1,6 +1,16 @@
 import pytest
+import keyring
 
 from jobgambit.core import render
+
+
+@pytest.fixture(autouse=True)
+def memory_password_store(monkeypatch):
+    """Even scratch homes must never read or write the user's OS password store."""
+    values = {}
+    monkeypatch.setattr(keyring, "get_password", lambda service, name: values.get((service, name)))
+    monkeypatch.setattr(keyring, "set_password", lambda service, name, value: values.__setitem__((service, name), value))
+    monkeypatch.setattr(keyring, "delete_password", lambda service, name: values.pop((service, name), None))
 
 
 @pytest.fixture(autouse=True)

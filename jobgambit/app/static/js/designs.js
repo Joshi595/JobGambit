@@ -6,10 +6,14 @@ const STYLE_CHOICES = {
   date_pos: ["right", "left"], skills_style: ["lines", "tags", "stacked"], languages_style: ["text", "dots"], photo: ["circle", "square", "none"],
   paper: ["a4", "us-letter"],
 };
+const ALIGN = {  // the body text's alignment, as a word processor's four buttons draw it
+  left: "M2 3h12M2 6.5h8M2 10h12M2 13.5h8", center: "M2 3h12M4 6.5h8M2 10h12M4 13.5h8",
+  right: "M2 3h12M6 6.5h8M2 10h12M6 13.5h8", justify: "M2 3h12M2 6.5h12M2 10h12M2 13.5h12",
+};
 
 document.addEventListener("alpine:init", () => {
   Alpine.data("designs", () => ({
-    FONTS, STYLE_CHOICES,
+    FONTS, STYLE_CHOICES, ALIGN,
     list: [], presets: {}, keys: {}, current: "", defaults: {}, sections: [], loading: true, loadErr: "", failed: {},
     mode: "gallery", look: "", name: "", design: "", s: null, style: {}, rows: [], timer: null, err: "",
     pages: [], limit: 0, updating: false, ctrl: null, saveName: "", saveUse: false, saveErr: "",

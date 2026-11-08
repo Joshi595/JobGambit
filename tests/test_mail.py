@@ -36,6 +36,23 @@ def test_classify_replies():
     assert mail.classify("Leider konnten wir den Sichtungsprozess noch nicht abschließen und bitten um etwas Geduld.") is None
 
 
+def test_a_legal_footer_is_no_rejection():
+    receipt = ("Eingangsbestätigung | Ihre Bewerbung als Werkstudent. Guten Tag, vielen Dank für Ihre Bewerbung. Wir haben "
+               "Ihre Unterlagen erhalten und nehmen uns Zeit, diese sorgfältig zu prüfen. Die Nachricht ist vertraulich und "
+               "durch den Empfaenger bestimmt, soweit diese Nachricht im Einzelfall nicht einen anderweitigen Umgang erlaubt.")
+    assert mail.classify(receipt) == "acknowledgement"  # KORSCH, 7 Nov: filed as a rejection
+    assert mail.classify("Leider haben wir uns anderweitig entschieden.") == "rejected"
+    assert mail.classify("Die Stelle wurde bereits anderweitig besetzt.") == "rejected"
+    assert mail.classify("Wir haben uns nach reiflicher Überlegung anderweitig orientiert.") == "rejected"
+
+
+def test_a_receipt_for_an_application_kept_as_not_sent_means_it_went_out():
+    assert mail.step({"status": "withdrawn"}, "acknowledgement") == "applied"  # NAIRON, 7 Nov: join.com sends at step 1
+    assert mail.step({"status": "pending"}, "acknowledgement") == "applied"
+    assert mail.step({"status": "applied"}, "acknowledgement") is None
+    assert mail.step({"status": "interview"}, "acknowledgement") is None
+
+
 def test_classify_next_steps_that_were_missed():
     """Real replies the first version misread: an interview that wasn't one, a rejection read as a receipt, unfinished
     applications read as receipts."""
@@ -651,3 +668,5 @@ def test_a_normal_password_gets_the_app_password_advice(home, monkeypatch):
     monkeypatch.setattr(mail, "test", refuse)
     r = c.post("/api/email/test")
     assert r.status_code == 422 and "app password made for JobGambit" in r.json()["detail"]
+
+

@@ -116,8 +116,9 @@ def apply_state(key: str):
 
 @router.post("/apply/{key}/current")
 def make_current(key: str):
-    """The person opened this application: its CV and letter go into the Current application folder."""
-    if not posting.get(key) or not any(apply.workdir(key).glob("*.pdf")):
+    """The person opened this application: its CV and letter go into the Current application folder, the previous
+    application's leave it (also when this one has no PDFs yet: they come once its Review is done)."""
+    if not posting.get(key):
         raise HTTPException(404)
     return {"warning": apply.show_files(apply.workdir(key))}
 
@@ -195,6 +196,17 @@ def applications():
     return {"rows": rows, "statuses": STATUSES}
 
 
+@router.post("/applications/{app_id}/reopen")
+def application_reopen(app_id: int):
+    """Apply myself: a not-sent-yet application back on the Apply page, with its saved documents."""
+    with db() as con:
+        row = con.execute("select job_key from applications where id=? and status='pending'", (app_id,)).fetchone()
+    if not (row and row["job_key"] and posting.get(row["job_key"])):
+        raise HTTPException(404)
+    apply.reopen(row["job_key"])
+    return {"key": row["job_key"]}
+
+
 @router.get("/applications/{app_id}/posting")
 def application_posting(app_id: int):
     """The posting an application was written for (its archived copy, else the stored description): the drawer shows it
@@ -260,8 +272,10 @@ DOC_TYPES = {".pdf", ".png", ".jpg", ".jpeg", ".docx", ".doc", ".odt", ".txt"}
 
 @router.get("/upload-folder")
 def upload_folder():
-    """The upload folder and the person's own documents in it (certificates, transcripts, references…)."""
-    return {"folder": str(apply.current()), "documents": apply.own_documents()}
+    """The upload folder, the person's own documents in it (certificates, transcripts, references…) and the CV and
+    letter of the application open right now."""
+    return {"folder": str(apply.current()), "documents": apply.own_documents(),
+            "current": [n for n in apply.placed() if (apply.current() / n).is_file()]}
 
 
 @router.post("/upload-folder/files")

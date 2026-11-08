@@ -68,3 +68,22 @@ def test_a_status_set_by_hand_keeps_its_day(client):
     client.put("/api/applications/1", json={"status": "rejected"})
     with db() as con:
         assert json.loads(con.execute("select data from applications where id=1").fetchone()[0])["status_at"] == date.today().isoformat()
+
+
+def test_apply_myself_reopens_a_not_sent_application_on_the_apply_page(client, tmp_path):
+    """Its saved CV and letter go back into the work folder (the Apply page opens at Documents, no new draft); "I
+    applied" there updates the same row. A sent application can't be reopened."""
+    from jobgambit.core import apply, posting
+    posting.save({"key": "k", "title": "Nurse", "company": "Acme", "url": "https://acme.example/1", "description": "d"})
+    w = apply.work("k")
+    (w / "Ana_CV_Acme.pdf").write_bytes(b"%PDF")
+    apply.dump("k", "fit", {"company": "Acme", "role": "Nurse", "score": 70, "country": "DE"})
+    apply.dump("k", "state", {"stage": "ready"})
+    app_id = apply.finish("k", "pending", clear=False)["id"]
+    assert apply.state("k")["stage"] == "new"  # finish() emptied the work folder
+    assert client.post(f"/api/applications/{app_id}/reopen").json()["key"] == "k"
+    assert apply.state("k")["stage"] == "ready" and apply.state("k")["files"] == ["Ana_CV_Acme.pdf"]
+    apply.finish("k", "applied", "company website")
+    with db() as con:
+        assert [tuple(r) for r in con.execute("select id, status from applications")] == [(app_id, "applied")]
+    assert client.post(f"/api/applications/{app_id}/reopen").status_code == 404

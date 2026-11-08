@@ -33,9 +33,12 @@
 #v(0.4em)
 #d.salutation
 
-#for p in d.paragraphs [#md(p)
-
-]
+#{
+  // the paragraphs as the CV's body text is aligned (style.align); the letterhead, date and closing keep their places
+  set par(justify: s.align == "justify")
+  set align(if s.align == "center" { center } else if s.align == "right" { right } else { left })
+  for p in d.paragraphs { md(p); parbreak() }
+}
 #block(breakable: false)[
   #d.closing
   #v(1.2em)

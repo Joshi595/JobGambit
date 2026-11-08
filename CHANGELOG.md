@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.18.4 (2026-11-07)
+
+- A word in a mail's legal footer no longer files a receipt as a rejection ("anderweitig" now needs a decision around it).
+- A receipt for an application kept as not sent moves it to applied: it went out.
+
+
+## 0.17.18 (2026-11-06)
+
+- A CV uses its pages: the word target now matches what two full pages hold (it was far too low), and automatic fixes cut only
+  what runs over. With room left on the last page, lines the writer removed come back, courses first, and a page that stays
+  half empty shows as a warning. No AI for any of this.
+- A Profile with one flagged term stays the one written for this job, with a warning, instead of being replaced by the first
+  summary of the master CV.
+- The standard cost level writes the CV and letter on Sonnet too: under the new CV rules a blind comparison of 5 applications
+  found them as good as Opus's, for 56% less. Premium still writes on Opus.
+- Designs › Look › Text alignment: left, centred, right or justified, as in a word processor, for the Profile, the lines under
+  each entry and the letter's paragraphs. Headings and dates keep the design's; left is the default, so nothing else moves.
+
+## 0.17.17 (2026-11-06)
+
+- AI usage includes every model and final thinking totals; incomplete usage and unknown cost are labelled explicitly.
+- A draft interrupted during review is reused when its inputs match. Drafts receive page and length targets and one
+  relevant approved wording per bullet; automatic repairs affect only failing documents and stop without progress.
+- Review and automatic repair use medium effort. Opus drafting and the independent reviewer are retained.
+
+
+## 0.17.8 (2026-11-03)
+
+- **My applications:** an application not sent yet has **Apply myself**: it opens on the Apply page with its CV and
+  letter (also put in the Current application folder); “I applied” there marks that same application sent.
+- **Current application folder:** opening an application always takes the previous one's CV and letter out, also
+  when the new one has no PDFs yet (they are made once its Review is done); Your documents says so.
+
+## 0.17.7 (2026-11-03)
+
+- **Your documents** (Profile › Application details) also lists the CV and cover letter of the application you
+  have open, as they are in the upload folder.
+
 ## 0.17.6 (2026-11-03)
 
 - **German:** Settings › Appearance › App language › Deutsch. Every page is in German; server messages, alerts and

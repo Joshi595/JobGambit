@@ -4,6 +4,7 @@ the person's decisions, PDFs with checks, archive. Ported from the original pipe
 Work files live in <data>/work/<job key>/ until the application is archived in <data>/applications/.
 """
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -17,7 +18,7 @@ from rapidfuzz import fuzz
 
 from jobgambit.core import ai, check, posting, prompts, render, score, skillmap, sources
 from jobgambit.core import profile as pf
-from jobgambit.core.data import db, home
+from jobgambit.core.data import atomic_write, db, home
 from jobgambit.core.profile import Field, Model
 
 MAX_PROJECTS = 3
@@ -147,7 +148,7 @@ def show_files(folder: Path) -> str:
         names = [pdf.name for pdf in folder.glob("*.pdf")]
         for name in names:
             shutil.copy2(folder / name, out / name)
-        (home() / "current.json").write_text(json.dumps(names), encoding="utf-8")
+        atomic_write(home() / "current.json", json.dumps(names))
         return ""
     except OSError as e:
         return f"Couldn't update the Current application folder ({e.strerror}). Close the PDF if it is open, then try again."
@@ -162,7 +163,17 @@ def clear_current(folder: Path):
                 (current() / name).unlink(missing_ok=True)
             except OSError:
                 pass  # open in a PDF viewer: it stays; the next application replaces it
-        (home() / "current.json").write_text("[]", encoding="utf-8")
+        atomic_write(home() / "current.json", "[]")
+
+
+def reopen(key: str):
+    """Apply myself, for an application saved as not sent yet (pending): its archived documents go back into the work
+    folder, so the Apply page opens at its ready step instead of drafting again. Sending there updates that same
+    pending row (finish)."""
+    with db() as con:
+        row = con.execute("select folder from applications where job_key=? and status='pending' order by id desc", (key,)).fetchone()
+    if row and row["folder"] and not any(workdir(key).glob("*.pdf")):
+        shutil.copytree(home() / "applications" / row["folder"], work(key), dirs_exist_ok=True)
 
 
 def own_documents() -> list[str]:
@@ -178,7 +189,7 @@ def load(key, name, default=None):
 
 
 def dump(key, name, data):
-    (work(key) / f"{name}.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    atomic_write(work(key) / f"{name}.json", json.dumps(data, ensure_ascii=False, indent=1))
 
 
 def state(key) -> dict:
@@ -238,10 +249,27 @@ def factsheet(p: dict) -> str:
     return "\n".join(out)
 
 
-def variants_text(limit=3) -> str:
+def variants_text(limit=1, posting_text="", profile=None) -> str:
     path = pf.folder() / "variants.yaml"
     lib = YAML(typ="safe").load(path) if path.exists() else {}
-    return "\n".join(f"[{bid}] " + " | ".join(v["text"] for v in vs[-limit:]) for bid, vs in (lib or {}).items()) or "(none yet)"
+    ids = set(bullets(profile)) if profile is not None else None
+    terms = set(re.findall(r"\w{3,}", posting_text.lower()))
+    selected = []
+    for bid, vs in (lib or {}).items():
+        if ids is not None and bid not in ids:
+            continue
+        # Prefer overlap with this posting, newest wording on ties. No model call and no changes to approved text.
+        ranked = sorted(enumerate(vs), key=lambda v: (len(terms & set(re.findall(r"\w{3,}", v[1]["text"].lower()))), v[0]), reverse=True)
+        selected.append(f"[{bid}] " + " | ".join(v["text"] for _, v in ranked[:limit]))
+    return "\n".join(selected) or "(none yet)"
+
+
+def cv_budget(pr, country="") -> tuple[int, int]:
+    design, settings = render.resolve(pr.design)
+    pages = render.page_limit(design, settings, country)
+    size = render.style_for(design, country, settings.get("style")).get("size", 10.5)
+    # 550: 67 real CVs filling page 2 to 90%+ had 940-1,102 words at size 11 (median 1,037). 350 left the pages half empty.
+    return pages, max(150, round(pages * 550 * (10.5 / size) ** 2))
 
 
 def style_text() -> str:
@@ -440,6 +468,7 @@ def applied_to(job: dict, index=None) -> dict | None:
 
 # ---------------------------------------------------------------- steps
 LETTER_FILL = 0.85  # a standard letter fills at least this much of its one page
+CV_FILL = 0.85  # and a CV its last page, as far as the lines it may bring back reach
 RESUMABLE = ("new", "shortlisted", "filtered", "paused")  # f"in {RESUMABLE}" is the SQL list; statuses an application in progress moves to 'applying' from
 RUNNING, LOCK = set(), threading.Lock()  # applications being drafted right now: never two runs (and two bills) for one
 
@@ -479,13 +508,13 @@ def draft(key: str, depth: str = "", stop_on_blocker: bool = False, note: str = 
         if key in RUNNING:
             raise ai.AIError("This application is already being written. It shows here as soon as it's ready.")
         RUNNING.add(key)
-    resume = load(key, "state", {}).get("stage") == "blocked" and load(key, "tailor")  # wanted anyway: its tailor run is paid for
+    resume = load(key, "state", {}).get("stage") in {"blocked", "tailored", "drafting"} and load(key, "tailor")
     try:
         set_stage(key, "drafting")
         return _draft(key, depth, stop_on_blocker, resume, note.strip(), language)
     except BaseException:
         if load(key, "state", {}).get("stage") == "drafting":
-            set_stage(key, "blocked" if resume else "new")
+            set_stage(key, "tailored" if load(key, "tailor") else "new")
         raise
     finally:
         RUNNING.discard(key)
@@ -501,14 +530,21 @@ def _draft(key: str, depth: str, stop_on_blocker: bool, resume=None, note: str =
     style = style_text()
     lessons, k = pf.read("lessons") or "(none yet)", known(p)
     has, lacks = term_lists(keywords(job["description"], p, "", k), k, want != "match" and want != score.posting_language(job["description"]))
-    t = resume or ai.answer(prompts.build(
-        "tailor", factsheet=factsheet(p), style=style, lessons=lessons, variants=variants_text(), has=has, lacks=lacks,
+    page_limit, word_budget = cv_budget(pr, job.get("country") or "")
+    tailor_prompt = prompts.build(
+        "tailor", factsheet=factsheet(p), style=style, lessons=lessons, variants=variants_text(posting_text=job["description"], profile=p), has=has, lacks=lacks,
         cv_rules=cv_rules(), stories=stories_text(), language="the language the posting is written in" if want == "match" else want,
         languages=", ".join(f"{l['name']} {l.get('level', '')}" for l in p.get("languages", [])),
         posting=untrusted(job["description"]), max_projects=str(MAX_PROJECTS), **letter_size(pr),
         start=pr.start or "to be agreed", permits=permits or "not stated", availability=availability(pr),
-        note=note or "(nothing)"), Tailor, agent(), 900, key).model_dump()
+        note=note or "(nothing)", cv_pages=str(page_limit), cv_words=str(word_budget))
+    fingerprint = hashlib.sha256((tailor_prompt + json.dumps(Tailor.model_json_schema(), sort_keys=True) + pr.agent + pr.cost_level).encode()).hexdigest()
+    saved_input = load(key, "tailor_input")
+    if saved_input and saved_input.get("hash") != fingerprint:
+        resume = None
+    t = resume or ai.answer(tailor_prompt, Tailor, agent(), 900, key).model_dump()
     dump(key, "tailor", t)
+    dump(key, "tailor_input", {"hash": fingerprint})
     fit = {**t["job"], "score": job.get("score")}
     dump(key, "fit", fit)
     with db() as con:
@@ -756,8 +792,11 @@ def blocks(key: str, prop: dict, p: dict, acc: dict) -> dict:
 
 def auto_decisions(items):
     """Every card accepted, except flagged ones: those keep the profile's wording (only the person can confirm them).
-    auto: nobody chose it (never an approved wording); order: a new line or project order goes with its card."""
-    return [dict(id=i["id"], decision="reject" if i.get("flag") else "accept", text=i["old"] if i.get("flag") else i["new"], comment="",
+    A flagged Profile stays: its "profile's wording" is the first summary of the master CV, whatever the job (the build
+    warns of what it names). auto: nobody chose it (never an approved wording); order: a new line or project order goes
+    with its card."""
+    keep = lambda i: i.get("flag") and i["id"] != "summary"
+    return [dict(id=i["id"], decision="reject" if keep(i) else "accept", text=i["old"] if keep(i) else i["new"], comment="",
                  auto=True, **({"order": i["order"]} if "order" in i else {})) for i in items]
 
 
@@ -838,18 +877,32 @@ def change(key: str, request: str) -> dict:
     final, s, job, p = final_cards(key), load(key, "state", {}), posting.get(key), pf.profile().model_dump()
     lines = final["items"] + final["letter"]
     problems = [f for r in (s.get("checks") or {}).values() for f in r.get("fails", [])]
+    automatic = not request.strip()
+    repair_scope = ""
+    if automatic:
+        checks = s.get("checks") or {}
+        cv_bad = bool(checks.get("cv", {}).get("fails"))
+        letter_bad = bool(checks.get("letter", {}).get("fails"))
+        lines = (final["items"] if cv_bad else []) + (final["letter"] if letter_bad else [])
+        if not lines:
+            return {"stage": s.get("stage", "ready"), "checks": checks, "changes": []}
+        repair_scope = "Change only the failing document(s): " + ", ".join(x for x, bad in (("CV", cv_bad), ("cover letter", letter_bad)) if bad) + "."
+        if over := checks.get("cv", {}).get("over_words"):  # only what runs over: the rest of the CV keeps its place on the pages
+            repair_scope += (f" The CV runs about {over} words over its {checks['cv'].get('max_pages')} pages. Cut about {over + 20} words "
+                             "from its lowest-priority lines and leave the other lines as they are.")
     rev = ai.answer(prompts.build(
         "change", factsheet=factsheet(p), style=style_text(), cv_rules=cv_rules(), **letter_size(),
         cards="\n".join(f"{c['id']} ({c['section']}): {c['new']}" for c in lines), problems="\n".join(problems) or "(none)",
         request=request.strip() or "Fix the problems the checks found.", posting=untrusted(job["description"]),
-        language=final["language"]), Change, agent(), key=key).model_dump()
+        language=final["language"], repair_scope=repair_scope), Change, agent(), key=key).model_dump()
     if rev["language"] and rev["language"].lower() != final["language"]:  # subject, salutation, every line: a new draft
         return {"restart": rev["language"].lower()}
     by, k = {c["id"]: c for c in lines}, known(p)
     odd = {e["id"]: unnamed(e["new"], k) for e in rev["edits"] if e["id"] in by and not re.fullmatch(r"p\d+", e["id"])}
     edits = [e for e in rev["edits"] if e["id"] in by and not odd.get(e["id"])]  # a CV line never names a skill the profile doesn't
     dump(key, "proposal", final)
-    r = decide(key, [{"id": e["id"], "decision": "edit", "text": e["new"], "auto": True} for e in edits])  # the AI's words: never an approved wording
+    r = decide(key, [{"id": e["id"], "decision": "edit", "text": e["new"], "auto": True,  # the AI's words: never an approved wording
+                      **({"asked": True} if not automatic else {})} for e in edits])  # asked: the person wanted this, it stays
     return {**r, "changes": [e["reason"] for e in edits],
             "refused": [f"Not changed: {by[i]['section']} would name {', '.join(n)}, which your profile doesn't." for i, n in odd.items() if n],
             # what changed, line by line: the page shows each as a word diff
@@ -947,15 +1000,48 @@ def tidy(cv: dict, draw, limit: int) -> tuple[dict, bytes]:
     return {**cv, "projects": order}, pdf
 
 
+def fill_up(key: str, p: dict, kind: str, cv: dict, pdf: bytes, draw, limit: int) -> tuple[dict, bytes]:
+    """Room left on the CV's last page: lines the writer removed come back in the master CV's wording, courses first, while
+    the pages hold them and no heading gets cut off from its lines. No AI. A line the person removed or asked to remove
+    stays out."""
+    from io import BytesIO
+    from pypdf import PdfReader
+    size = lambda pdf: len(PdfReader(BytesIO(pdf)).pages)
+    if size(pdf) > limit:
+        return cv, pdf
+    acc = load(key, "accepted", {})
+    theirs = {d["id"] for r in load(key, "rounds", []) for d in r if not d.get("auto") or d.get("asked")}
+    shown = {x["id"] for x in cv["projects"]}
+    gone = [b["id"] for sec in ("courses", "experience", "projects", "volunteering") for e in p.get(sec) or []
+            if sec != "projects" or e["id"] in shown for b in e.get("bullets") or []
+            if b["id"] in acc and not acc[b["id"]]["text"] and b["id"] not in theirs]
+    problems = placement(pdf, cv["projects"])[1]
+    for i in gone:
+        if size(pdf) >= limit and check.filled(BytesIO(pdf), -1) >= CV_FILL:
+            break
+        trial = {k: v for k, v in acc.items() if k != i}
+        again = cv_data(p, trial, kind)
+        by = {x["id"]: x for x in again["projects"]}
+        again["projects"] = [by[x["id"]] for x in cv["projects"]]  # the order and the choice tidy() and build() made
+        candidate = draw(again)
+        if size(candidate) <= limit and placement(candidate, again["projects"])[1] <= problems:
+            acc, cv, pdf = trial, again, candidate
+    if len(acc) != len(load(key, "accepted", {})):
+        dump(key, "accepted", acc)
+    return cv, pdf
+
+
 def build(key: str, design: str = "") -> dict:
-    """PDFs from the accepted state, then the checks. Over the page limit: the last project is left out once."""
+    """PDFs from the accepted state, then the checks. Over the page limit: the last project is left out once. Room left:
+    fill_up()."""
     s, fit, job = load(key, "state", {}), load(key, "fit"), posting.get(key)
     p = pf.profile().model_dump()
     look = design or s.get("design") or prefs().design  # a saved look (preset) or a design id
     design, settings = render.resolve(look)
     lang, country = s.get("language", "en"), fit.get("country", "")
     pages = render.page_limit(design, settings, country)
-    cv = cv_data(p, load(key, "accepted", {}), job_kind(job, fit))
+    kind = job_kind(job, fit)
+    cv = cv_data(p, load(key, "accepted", {}), kind)
     for old in work(key).glob("*.pdf"):
         old.unlink()
     name = p["basics"].get("name") or "CV"
@@ -966,7 +1052,9 @@ def build(key: str, design: str = "") -> dict:
     if len(PdfReader(BytesIO(pdf)).pages) > pages and len(cv["projects"]) > 1:
         cv["projects"] = cv["projects"][:-1]
         pdf = render.cv_pdf(cv, design, lang, country, settings=settings)
-    cv, pdf = tidy(cv, lambda c: render.cv_pdf(c, design, lang, country, settings=settings), pages)  # a clean page break
+    draw = lambda c: render.cv_pdf(c, design, lang, country, settings=settings)
+    cv, pdf = tidy(cv, draw, pages)  # a clean page break
+    cv, pdf = fill_up(key, p, kind, cv, pdf, draw, pages)
     cv_path.write_bytes(pdf)
     letter = load(key, "letter") or {}
     letter_path = work(key) / filename(name, "Cover_Letter", fit["company"])
@@ -975,6 +1063,14 @@ def build(key: str, design: str = "") -> dict:
     checks = {"cv": {**check.check("", pdf=cv_path, max_pages=pages), "terms": keywords(job["description"], p, text, k)},
               "letter": check.check("", job["description"], pdf=letter_path, max_pages=1,
                                     fill=0 if prefs().letter_length == "short" else LETTER_FILL)}
+    sheets = PdfReader(cv_path).pages
+    use = check.filled(cv_path, -1)
+    checks["cv"].update(pages=len(sheets), max_pages=pages, words=len(text.split()), fill=round(use, 2),
+                        over_words=sum(len((x.extract_text() or "").split()) for x in sheets[pages:]))
+    if 1 < pages == len(sheets) and use < CV_FILL:
+        checks["cv"]["warns"].append(f"page {pages} is only {use:.0%} full")
+    checks["letter"].update(pages=len(PdfReader(letter_path).pages), max_pages=1,
+                            words=sum(len(x.split()) for x in letter.get("paragraphs", [])))
     if odd := unnamed(text, k):
         checks["cv"]["warns"].append("names skills your profile doesn't: " + ", ".join(odd))
     set_stage(key, "ready", design=look, checks=checks)
@@ -999,7 +1095,8 @@ def add_variants(acc, bl, source, rounds=()):
         out.dump(lib, f)
 
 
-def finish(key: str, status: str = "applied", method: str = "", note: str = "", when: str = "", clear: bool = True) -> dict:
+def finish(key: str, status: str = "applied", method: str = "", note: str = "", when: str = "", clear: bool = True,
+           preserve_status: bool = False) -> dict:
     """Archives the application. clear: a sent one's CV and letter leave the upload folder (off for runs that never
     put them there)."""
     fit, job = load(key, "fit"), posting.get(key)
@@ -1034,7 +1131,8 @@ def finish(key: str, status: str = "applied", method: str = "", note: str = "", 
                                   json.dumps({"score": fit["score"], "country": fit["country"], "url": job.get("url", ""),
                                               # how many had applied when this one went (LinkedIn postings), for the drawer
                                               "applicants_when_applied": json.loads(job.get("data") or "{}").get("applicants")}))).lastrowid
-        con.execute("update jobs set status='applied' where key=?", (key,))
+        if not preserve_status:
+            con.execute("update jobs set status='applied' where key=?", (key,))
         if status != "pending":  # sent from the Apply page: off Needs you too
             con.execute("update needs set done=1 where job_key=?", (key,))
     shutil.rmtree(work(key), ignore_errors=True)

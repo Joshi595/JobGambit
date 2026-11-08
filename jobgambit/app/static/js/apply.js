@@ -3,9 +3,13 @@ const fileUrl = path => `/api/file?path=${encodeURIComponent(path)}&t=${TOKEN}`;
 // Tokens per AI call (the ai_calls ledger), shared with applications.html and Settings › AI.
 window.stepName = s => { const k = `apply.u.${s}`, v = t(k); return v === k ? s : v; };
 window.kTok = n => n == null ? "–" : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-const TOKS = ["input", "fresh", "cache_write", "cached", "output", "thinking", "cost_usd"];
-window.usageTotal = rows => rows.reduce((a, u) => ({ ...a, ...Object.fromEntries(TOKS.map(k => [k, a[k] + (u[k] || 0)])) }),
+const TOKS = ["input", "fresh", "cache_write", "cached", "output", "thinking", "cost_usd", "unknown_costs", "incomplete"];
+window.usageTotal = rows => rows.reduce((a, u) => ({ ...a, ...Object.fromEntries(TOKS.map(k => [k, a[k] +
+  (k === "unknown_costs" ? u.unknown_costs ?? Number(u.cost_status === "unknown") :
+   k === "incomplete" ? u.incomplete ?? Number(["partial", "unknown"].includes(u.usage_status)) : u[k] || 0)])) }),
   { step: "total", total: true, ...Object.fromEntries(TOKS.map(k => [k, 0])) });
+window.usageCost = u => u.cost_usd == null ? "?" : "$" + u.cost_usd.toFixed(2) +
+  (u.unknown_costs || u.cost_status === "unknown" ? " + ?" : "");
 // What changed in a line, word by word: [{t, op: "" | "add" | "del", b}] (longest common subsequence of the words).
 // **bold** marks are read (b), never shown. Shown with x-text spans: no HTML from a line ever reaches the page.
 window.wordDiff = (a = "", b = "") => {
@@ -47,8 +51,8 @@ document.addEventListener("alpine:init", () => {
       if (this.job) api(`/api/jobs/${this.key}/applicants`, { method: "POST" }).then(r => { this.applicants = r.applicants; }).catch(() => {});
       this.$watch("dec", () => this.saveChoices());
       this.$watch("head", () => this.saveChoices());
+      this.makeCurrent();  // the folder holds this application's files only (none until its PDFs are made)
       if (this.stage === "drafting") return this.waitDraft();
-      if (this.stage === "ready") this.makeCurrent();
       const fresh = ["new", "fit", "blocked"].includes(this.stage);  // "fit": a work folder from before the fit check was dropped
       if (fresh && !this.applied) this.draft();  // already applied: never a second application
     },

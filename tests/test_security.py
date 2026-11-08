@@ -173,3 +173,70 @@ def test_no_password_store_reads_as_nothing_saved(tmp_path, monkeypatch):
     assert secrets.get("email_password") == "" and secrets.names() == []
     c = TestClient(server.app, base_url="http://127.0.0.1", headers={"x-token": server.TOKEN})
     assert c.get("/api/mail/items").status_code == 200
+
+
+def test_atomic_write_preserves_the_old_file_on_failure(tmp_path, monkeypatch):
+    from jobgambit.core import data
+    target = tmp_path / "state.json"
+    target.write_text("old", encoding="utf-8")
+    monkeypatch.setattr(data.os, "replace", lambda *a: (_ for _ in ()).throw(PermissionError("locked")))
+    with pytest.raises(PermissionError):
+        data.atomic_write(target, "new")
+    assert target.read_text() == "old"
+    assert list(tmp_path.iterdir()) == [target]
+
+
+def test_backup_excludes_launch_credentials_and_logs(home):
+    import io
+    import zipfile
+    from jobgambit.core import system
+    for name in ("instance.json", "open.html", "browser-port", "app.log"):
+        (home / name).write_text("private", encoding="utf-8")
+    pf.write("profile", {"basics": {"name": "Example"}})
+    names = zipfile.ZipFile(io.BytesIO(system.backup())).namelist()
+    assert "profile/master_cv.yaml" in names
+    assert not {"instance.json", "open.html", "browser-port", "app.log"} & set(names)
+
+
+def test_unexpected_errors_redact_saved_secrets(home, monkeypatch):
+    from jobgambit.app import server
+    from jobgambit.core import secrets
+    secrets.put("email_password", "private-password-777")
+    monkeypatch.setattr(pf, "read", lambda kind: (_ for _ in ()).throw(ValueError("private-password-777")))
+    c = TestClient(server.app, base_url="http://127.0.0.1", headers={"x-token": server.TOKEN}, raise_server_exceptions=False)
+    response = c.get("/api/state")
+    assert "private-password-777" not in response.text
+    assert "private-password-777" not in (home / "app.log").read_text(encoding="utf-8")
+
+
+def test_partial_deletion_reports_what_remains(home, monkeypatch):
+    from jobgambit.core import secrets
+    (home / "keep.txt").write_text("example", encoding="utf-8")
+    unlink = Path.unlink
+    def locked(path, *args, **kwargs):
+        if path.name == "keep.txt":
+            raise PermissionError("locked")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", locked)
+    response = client().post("/api/delete-everything", json={"confirm": "DELETE"})
+    assert response.status_code == 200 and not response.json()["ok"]
+    assert any(item["path"].endswith("keep.txt") for item in response.json()["remaining"])
+
+
+def test_failed_secret_deletion_retains_its_index(home, monkeypatch):
+    from jobgambit.core import secrets
+    secrets.put("example_password", "example-only")
+    monkeypatch.setattr(keyring, "delete_password", lambda *a: (_ for _ in ()).throw(keyring.errors.PasswordDeleteError("locked")))
+    assert secrets.delete_all() == ["example_password"]
+    assert secrets.names() == ["example_password"]
+
+
+def test_backup_can_stream_to_a_file(home):
+    import zipfile
+    from jobgambit.core import system
+    pf.write("profile", {"basics": {"name": "Synthetic"}})
+    target = home.parent / "streamed.zip"
+    system.backup(target)
+    with zipfile.ZipFile(target) as archive:
+        assert archive.read("profile/master_cv.yaml")
+        assert all(info.compress_type == zipfile.ZIP_STORED for info in archive.infolist())

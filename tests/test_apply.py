@@ -1,5 +1,6 @@
 import pytest
 
+from jobgambit.app import apply_api
 from jobgambit.core import apply, check, posting, render
 
 P = {"summaries": {"main": "S"}, "education": [], "languages": [], "skills": {"A": ["x"], "B": ["y", "z"]},
@@ -330,6 +331,9 @@ def test_current_application_folder_and_saved_choices(monkeypatch):
     assert s["choices"]["b1"]["decision"] == "reject" and s["folder"] == str(apply.current())
     apply.clear_current(apply.work("k"))
     assert not any(apply.current().glob("*.pdf"))
+    apply.show_files(apply.work("k"))
+    apply.show_files(apply.workdir("new"))  # opened one without PDFs yet (in Review): the previous one's go
+    assert not any(apply.current().glob("*.pdf")) and apply.placed() == []
 
 
 def test_own_documents_stay_in_the_upload_folder():
@@ -343,6 +347,7 @@ def test_own_documents_stay_in_the_upload_folder():
     apply.show_files(apply.work("b"))
     assert sorted(p.name for p in out.iterdir()) == ["Bachelor certificate.pdf", "N_CV_B.pdf"]
     assert apply.own_documents() == ["Bachelor certificate.pdf"]
+    assert apply_api.upload_folder()["current"] == ["N_CV_B.pdf"]  # shown under Profile › Your documents
     apply.clear_current(apply.work("b"))
     assert [p.name for p in out.iterdir()] == ["Bachelor certificate.pdf"]
 

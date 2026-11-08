@@ -63,6 +63,63 @@ def test_every_page_as_svg():
     assert len(pages) >= 2 and all(b"<svg" in p[:300] for p in pages)
 
 
+WORDS = ("alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon "
+         "phi chi psi omega ") * 3
+
+
+def text_lines(svg: bytes) -> list[tuple[float, float]]:
+    """(first glyph x, last glyph x) of every text run with 30+ glyphs, in page coordinates."""
+    import re
+    stack, out = [], []
+    for m in re.finditer(rb'<g transform="(translate|matrix)\(([^)]*)\)">|</g>|<use [^>]*?x="([\d.-]+)"', svg):
+        if m[1]:
+            n = [float(v) for v in m[2].split()]
+            stack.append({"x": n[-2] if m[1] == b"matrix" else n[0], "xs": []})
+        elif m[3]:
+            stack[-1]["xs"].append(sum(g["x"] for g in stack) + float(m[3]))
+        elif stack:
+            xs = stack.pop()["xs"]
+            if len(xs) >= 30:
+                out.append((xs[0], xs[-1]))
+    return out
+
+
+def spread(values):
+    return max(values) - min(values)
+
+
+def body(align, bullet=False):
+    cv = {"basics": {"name": "Sam Sample"}, "summary": "" if bullet else WORDS.strip(), "projects": [], "education": [],
+          "skills": {}, "languages": [], "volunteering": [], "courses": [], "custom": [],
+          "experience": [{"id": "e", "org": "Org", "title": "Role", "bullets": [{"id": "b", "text": WORDS.strip()}]}] if bullet else []}
+    lines = text_lines(render.cv_pages(cv, "classic", "en", "GB", settings={"style": {"align": align}})[0])
+    assert len(lines) >= 3, lines
+    return lines
+
+
+def test_text_alignment_like_a_word_processor():
+    """Left, centre, right or justified, for the Profile and the lines under each job. Headings and dates keep the design's."""
+    assert render.STYLE["align"] == "left"
+    left, right, centre, justify = (body(a) for a in ("left", "right", "center", "justify"))
+    assert spread([s for s, _ in left]) < 0.5 and spread([e for _, e in left[:-1]]) > 12  # ragged right edge
+    assert spread([s for s, _ in right]) > 12 and spread([e for _, e in right[:-1]]) < 9
+    assert spread([s for s, _ in centre]) > 6 and spread([(s + e) / 2 for s, e in centre[:-1]]) < 5
+    assert spread([s for s, _ in justify]) < 0.5 and spread([e for _, e in justify[:-1]]) < 9  # both edges straight
+    bullets = body("justify", bullet=True)
+    assert spread([e for _, e in bullets[:-1]]) < 9 < spread([e for _, e in body("left", bullet=True)[:-1]])
+
+
+def test_the_letter_follows_the_alignment():
+    def starts(align):
+        pdf = render.letter_pdf({"subject": "S", "paragraphs": [WORDS.strip()]}, {"name": "Sam Sample"}, "classic", "en", "GB",
+                                settings={"style": {"align": align}})
+        xs = []
+        PdfReader(io.BytesIO(pdf)).pages[0].extract_text(visitor_text=lambda t, cm, tm, f, s: xs.append(
+            round(tm[4] * cm[0] + tm[5] * cm[2] + cm[4], 1)) if "alpha" in t or "psi" in t or "phi" in t or "tau" in t else None)
+        return xs
+    assert spread(starts("left")) < 0.5 and spread(starts("right")) > 12
+
+
 def test_thumb_key_follows_what_it_shows(home):
     import os
     from jobgambit.core import profile as pf

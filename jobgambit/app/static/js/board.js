@@ -11,8 +11,15 @@ document.addEventListener("alpine:init", () => {
     async init() {
       this.country = Alpine.store("app").state?.preferences.targets?.[0]?.code || "";  // the first target country, not all
       this.section = this.sections()[0];  // the kind of job they picked first
+      if (Alpine.store("app").boardState) Object.assign(this, Alpine.store("app").boardState);
       await this.load();
+      if (this.section === "less") await this.pick("less");
       await this.watch();
+      requestAnimationFrame(() => scrollTo(0, Alpine.store("app").scrolls["board/"] || 0));
+    },
+    destroy() {
+      clearTimeout(this.poll);
+      Alpine.store("app").boardState = Object.fromEntries(["section", "country", "sort", "q", "days", "reason", "limit"].map(k => [k, this[k]]));
     },
     async load() {  // the open postings; Less relevant loads on first visit
       this.err = "";

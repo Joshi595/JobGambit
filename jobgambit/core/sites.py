@@ -5,6 +5,7 @@ Origins: you · posting · posting page · apply link · applying · pasted · n
 """
 import json
 import re
+import sqlite3
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -38,7 +39,10 @@ def learn(url, company, origin, title="", fetch=True):
         except Exception:  # learning is a bonus: never breaks a search or an application
             found = None
     if found:
-        add(*found, company, origin)
+        try:
+            add(*found, company, origin)
+        except sqlite3.OperationalError:
+            return None  # optional discovery must not crash its worker or change a submission result
     return found
 
 

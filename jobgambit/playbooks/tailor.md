@@ -42,6 +42,8 @@ job (read off the posting):
 - contact_name: the contact person the posting names, or "".
 
 CV:
+- Fill {cv_pages} pages without going over: about {cv_words} words across the CV's visible content. Keep bullets concise,
+  normally at most 35 words each, and the summary at most 60 words. Keep the strongest relevant evidence and exact facts.
 - summary: a 2-3 sentence profile for this job, only from the facts. summary_reason: why.
 - bullets: reword lines (by id) into the posting's terms where the fact truly supports it; keep numbers exactly. new = "" removes a line that is irrelevant here. Give a short reason and the posting keywords it covers. Set flag=true when the wording stretches the fact (an interview would need "what I actually meant was…"); never claim a bigger role than the fact (e.g. "Led" for "Built").
 - orders: key = an entry id (bullet order inside it), "projects" (the {max_projects} most relevant project ids first; only those are shown) or "skills" (category order). Only when the order should change.
