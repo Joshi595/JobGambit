@@ -1,5 +1,34 @@
 # Changelog
 
+
+
+
+
+
+
+## 0.20.1 (2026-11-09)
+
+- **Calmer pages.** On the Board, each posting's Apply is a quiet button that turns primary on the posting you're on;
+  My applications' "Apply myself" and the Apply page's "Change the documents" are no longer primary next to the main
+  action. Small grey text is darker, readable to WCAG AA in light and dark mode. Small icon buttons are finger-sized on
+  touch screens.
+- **Search reads more postings right.** A German date with the full year ("23.10.2026") counts for the 60-day age
+  filter, and a page saying "nicht mehr vakant" marks the posting closed.
+
+
+
+
+
+## 0.18.7 (2026-11-09)
+
+- **A logo of its own**: two squares, the one left behind and the one moved to, a gambit's first move. It shows in the
+  sidebar, the browser tab and the desktop shortcut (new installs; reinstall to get it on an existing shortcut).
+
+
+## 0.18.5 (2026-11-08)
+
+- oauthlib 4.0.1: fixes a known security issue (CVE-2026-49272) in a library that notifications (apprise) use.
+
 ## 0.18.4 (2026-11-07)
 
 - A word in a mail's legal footer no longer files a receipt as a rejection ("anderweitig" now needs a decision around it).

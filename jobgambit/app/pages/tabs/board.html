@@ -109,7 +109,7 @@
             <template x-for="w in warns(j)" :key="w"><span class="badge warn" x-text="w"></span></template>
             <span x-text="whyText(j)"></span>
           </div>
-          <input class="job-note" x-show="j.note || j.noting" x-model="j.note" @change="saveNote(j)" :placeholder="t('board.note')" :aria-label="t('board.note')">
+          <input class="job-note" x-show="j.note || j.noting" x-model="j.note" @change="saveNote(j)" :placeholder="t('board.note_ph')" :aria-label="t('board.note')">
         </div>
         <div class="job-acts" x-show="section !== 'less'">
           <button class="btn ghost icon sm star" :aria-pressed="j.status === 'shortlisted'" :title="t('board.star')" :aria-label="t('board.star')"
@@ -120,11 +120,11 @@
                   @click="j.noting = true; $nextTick(() => $el.closest('li').querySelector('.job-note').focus())"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-pencil"/></svg></button>
           <button class="btn ghost icon sm" :title="t('board.skip')" :aria-label="t('board.skip')"
                   @click="setStatus(j, 'skipped')"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg></button>
-          <button class="btn primary sm" @click="open(j.key)" x-text="['applying', 'paused'].includes(j.status) ? t('board.continue') : t('board.apply')"></button>
+          <button class="btn secondary sm row-go" @click="open(j.key)" x-text="['applying', 'paused'].includes(j.status) ? t('board.continue') : t('board.apply')"></button>
         </div>
         <div class="job-acts" x-show="section === 'less'">
           <button class="btn secondary sm" @click="keep(j)" x-text="t('board.move')"></button>
-          <button class="btn primary sm" @click="applyLess(j)" x-text="t('board.apply')"></button>
+          <button class="btn secondary sm row-go" @click="applyLess(j)" x-text="t('board.apply')"></button>
         </div>
       </li>
     </template>
@@ -140,7 +140,7 @@
     </div>
     <form class="stack" @submit.prevent="add()">
       <p class="muted small" x-text="t('board.add_intro')"></p>
-      <label class="field"><span x-text="t('board.url')"></span><input type="url" x-model="url" placeholder="https://…" spellcheck="false"></label>
+      <label class="field"><span x-text="t('board.url')"></span><input type="url" x-model="url" placeholder="https://…" spellcheck="false" autocomplete="off"></label>
       <label class="field"><span x-text="t('board.text')"></span><textarea x-model="text" rows="5"></textarea></label>
       <div class="msg info" x-show="adding" x-text="t('working')"></div>
       <div class="msg bad" x-show="addErr" role="alert" x-text="addErr"></div>

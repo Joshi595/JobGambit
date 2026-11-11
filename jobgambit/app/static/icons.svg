@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg">
 <!-- Lucide icons v0.460.0, ISC License, Copyright (c) Lucide Contributors 2022 (portions Cole Bemis 2013-2022, Feather, MIT). https://lucide.dev -->
+<!-- JobGambit's own mark ("the move"): the square left behind, the square moved to -->
+<symbol id="i-brand" viewBox="0 0 24 24"><rect x="3" y="12" width="9" height="9" rx="1.5" /> <rect x="13" y="2" width="9" height="9" rx="1.5" fill="currentColor" stroke="none" /></symbol>
 <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14" /> <path d="m19 12-7 7-7-7" /></symbol>
 <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" /> <path d="M12 19V5" /></symbol>
 <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /> <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></symbol>

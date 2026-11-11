@@ -31,6 +31,7 @@ foreach ($old in "jobquill", "careerpilot") {
 Write-Host "Installing JobGambit..."
 & $uv tool install --force $source
 $app = Join-Path $env:USERPROFILE ".local\bin\jobgambit-app.exe"
+$ico = Get-ChildItem (Join-Path (& $uv tool dir) "jobgambit") -Recurse -Filter jobgambit.ico -ErrorAction SilentlyContinue | Select-Object -First 1
 
 # 3. Shortcuts (no console window: jobgambit-app is the windowless launcher)
 $shell = New-Object -ComObject WScript.Shell
@@ -39,6 +40,7 @@ foreach ($dir in @([Environment]::GetFolderPath("Desktop"), (Join-Path $env:APPD
     $lnk = $shell.CreateShortcut((Join-Path $dir "Start JobGambit.lnk"))
     $lnk.TargetPath = $app
     $lnk.Description = "Find jobs and tailor your CV"
+    if ($ico) { $lnk.IconLocation = "$($ico.FullName),0" }
     $lnk.Save()
 }
 

@@ -149,6 +149,18 @@ def test_server_needs_token_and_local_host(tmp_path, monkeypatch):
     assert evil.get("/api/health", headers={"x-token": server.TOKEN}).status_code == 400
 
 
+def test_brand_assets_are_served(tmp_path, monkeypatch):
+    monkeypatch.setenv("JOBGAMBIT_HOME", str(tmp_path))
+    from jobgambit.app import server
+    c = TestClient(server.app, base_url="http://127.0.0.1")
+    assert "<svg" in c.get("/static/favicon.svg").text
+    for name in ("jobgambit.ico", "favicon-192.png", "favicon-512.png"):
+        assert c.get(f"/static/{name}").status_code == 200
+    page = c.get(f"/?k={server.launch_code()}").text
+    assert 'rel="icon" href="/static/favicon.svg"' in page and page.count("#i-brand") == 3
+    assert 'id="i-brand"' in c.get("/static/icons.svg").text
+
+
 def test_pages_run_only_their_own_scripts(tmp_path, monkeypatch):
     """No inline scripts, no javascript: links, never inside another site's frame; links opened from the app carry no
     address (or ?t= key) with them."""

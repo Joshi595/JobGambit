@@ -95,6 +95,7 @@ MIGRATIONS = [
     "alter table ai_steps add column usage_status text default 'partial';",
     "alter table ai_steps add column cache_5m integer default 0;",
     "alter table ai_steps add column cache_1h integer default 0;",
+    "alter table needs add column detail text default '';",  # a card's last steps (JSON), from its send's trace
 ]
 
 

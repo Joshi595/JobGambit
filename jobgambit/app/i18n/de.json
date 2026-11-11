@@ -473,7 +473,8 @@
     "moved": "Auf deine Liste verschoben.",
     "paused": "Entwurf gespeichert",
     "continue": "Fortsetzen",
-    "applicants_d": "Wie viele sich beworben hatten, laut der öffentlichen LinkedIn-Seite (andere Jobbörsen zeigen es nicht). Wenige Bewerber: ein guter Zeitpunkt, sich zu bewerben."
+    "applicants_d": "Wie viele sich beworben hatten, laut der öffentlichen LinkedIn-Seite (andere Jobbörsen zeigen es nicht). Wenige Bewerber: ein guter Zeitpunkt, sich zu bewerben.",
+    "note_ph": "Eine Notiz für dich…"
   },
   "sites": {
     "title": "Karriereseiten",

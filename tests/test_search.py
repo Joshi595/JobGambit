@@ -660,3 +660,8 @@ def test_bite_widget_list(monkeypatch):
     assert [(r["url"], r["location"]) for r in got] == [("https://jobs.uni.example/jobposting/9f", "Ilmenau")]
     assert sent[1][1]["key"] == "ab12"  # the widget's own public key
     assert sources.ats_in('<div data-bite-jobs-api-listing="uni-x:main-listing"></div>', "https://uni.example/jobs") == ("bite", "uni-x:main-listing")
+
+
+def test_posted_ok_reads_german_full_year_dates():
+    assert sources.posted_ok("01.01.2026", 60) is False
+    assert sources.posted_ok(date.today().strftime("%d.%m.%Y"), 60) is True

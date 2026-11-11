@@ -231,7 +231,7 @@
         <h3 class="sub" x-text="t('apply.docs_ai')"></h3>
         <label class="field"><span class="small muted" x-text="t('apply.docs_ai_hint')"></span>
           <textarea rows="2" x-model="ask" :placeholder="t('apply.docs_ai_placeholder')"></textarea></label>
-        <div class="actions"><button class="btn primary" :disabled="!!busy" @click="changeDocs()" x-text="t('apply.docs_ai_go')"></button></div>
+        <div class="actions"><button class="btn secondary" :disabled="!!busy" @click="changeDocs()" x-text="t('apply.docs_ai_go')"></button></div>
         <ul class="small" x-show="changes.length"><template x-for="c in changes" :key="c"><li x-text="c"></li></template></ul>
         <ul class="doc-diffs" x-show="diffs.length" :aria-label="t('apply.what_changed')">
           <template x-for="d in diffs" :key="d.id">

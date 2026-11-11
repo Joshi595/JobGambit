@@ -14,7 +14,7 @@
   --surface-2:   light-dark(#F7F8FA, #1B242C);
   --ink:         light-dark(#17212B, #E3E8ED);
   --ink-2:       light-dark(#4D5966, #A5B0BB);
-  --ink-3:       light-dark(#7A8591, #7D8894);
+  --ink-3:       light-dark(#656E78, #828D9A);  /* small text: ≥ 4.6:1 on page, card and inset (WCAG AA) */
   --line:        light-dark(#DDE2E7, #26313B);
   --accent:      light-dark(#0F6E7C, #4FB3C1);
   --accent-soft: light-dark(#E3F1F3, #12323A);
@@ -143,6 +143,7 @@ main { width:100%; max-width:1040px; margin:0 auto; padding:var(--s5) var(--s5) 
 .btn.icon { width:36px; padding:0; }
 .btn.sm, .btn.small { min-height:28px; padding:3px 10px; font-size:var(--fs-2); }
 .btn.icon.sm { width:28px; padding:0; }
+@media (pointer: coarse) { .btn.icon.sm { width:44px; min-height:44px; } }  /* a finger's target on touch screens */
 .btn:disabled { opacity:.5; cursor:default; }
 
 /* ---- form fields ---- */
@@ -233,6 +234,7 @@ ul.jobs > .item, ul.apps > .item { content-visibility:auto; contain-intrinsic-si
 .job-acts .star[aria-pressed=true] { color:var(--star); }
 .job-acts .star[aria-pressed=true] .i { fill:currentColor; }
 .job-acts .zap[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); }
+.jobs .item:is(:hover, :focus-within) .row-go { background:var(--accent); border-color:var(--accent); color:var(--on-accent); }  /* one primary at a time: the row in hand */
 .sk-fit { width:28px; height:28px; border-radius:50%; flex:none; }
 .sk-line { flex:1; height:36px; }
 dialog form.stack { display:grid; gap:var(--s3); }

@@ -70,7 +70,7 @@
                 <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-mail"/></svg>
                 <span x-text="(r.data.replies || []).length"></span><span class="sr-only" x-text="t('applications.replies')"></span>
               </span>
-              <button class="btn primary sm" x-show="r.status === 'pending' && r.job_key" @click="applyMyself(r)" :title="t('applications.apply_myself_d')">
+              <button class="btn secondary sm" x-show="r.status === 'pending' && r.job_key" @click="applyMyself(r)" :title="t('applications.apply_myself_d')">
                 <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg><span x-text="t('applications.apply_myself')"></span></button>
               <a class="btn ghost sm" x-show="doc(r, 'cv')" :href="file(r, doc(r, 'cv'))" target="_blank" :title="doc(r, 'cv')">
                 <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-file-text"/></svg><span x-text="t('applications.cv')"></span></a>
@@ -112,7 +112,7 @@
             <a class="btn sm" x-show="cur.data.url" :href="cur.data.url" target="_blank" rel="noopener">
               <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-external-link"/></svg><span x-text="t('applications.posting')"></span>
               <span class="sr-only" x-text="t('board.new_tab')"></span></a>
-            <button class="btn primary sm" x-show="cur.status === 'pending' && cur.job_key" @click="applyMyself(cur)" :title="t('applications.apply_myself_d')">
+            <button class="btn secondary sm" x-show="cur.status === 'pending' && cur.job_key" @click="applyMyself(cur)" :title="t('applications.apply_myself_d')">
               <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg><span x-text="t('applications.apply_myself')"></span></button>
             <a class="btn sm" x-show="doc(cur, 'cv')" :href="file(cur, doc(cur, 'cv'))" target="_blank" :title="doc(cur, 'cv')">
               <svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-file-text"/></svg><span x-text="t('applications.cv')"></span></a>

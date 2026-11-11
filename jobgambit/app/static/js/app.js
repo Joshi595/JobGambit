@@ -67,7 +67,10 @@ document.addEventListener("alpine:init", () => {
     pageRequest: null, scrolls: {}, boardState: null,
     setupMode() { return this.state && !this.state.preferences.setup_done; },
     tabs() { return this.setupMode() ? ["setup", "help"] : MAIN_TABS; },
-    groups() { return this.setupMode() ? [{ id: "setup", tabs: ["setup"] }, { id: "end", tabs: ["help"] }] : NAV; },
+    groups() {
+      if (this.setupMode()) return [{ id: "setup", tabs: ["setup"] }, { id: "end", tabs: ["help"] }];
+      return window.tabShown ? NAV.map(g => ({ ...g, tabs: g.tabs.filter(tabShown) })) : NAV;
+    },
     on(k) {  // Apply belongs to the Board; Profile › Writing lights Writing, not Profile
       if (k === "writing") return writingOpen(this);
       if (k === "profile") return this.tab === "profile" && !writingOpen(this);

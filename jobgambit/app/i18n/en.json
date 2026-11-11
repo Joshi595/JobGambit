@@ -473,7 +473,8 @@
     "moved": "Moved to your board.",
     "paused": "draft saved",
     "continue": "Continue",
-    "applicants_d": "How many had applied, as LinkedIn's public page says (other job boards don't show it). Few applicants: a good time to apply."
+    "applicants_d": "How many had applied, as LinkedIn's public page says (other job boards don't show it). Few applicants: a good time to apply.",
+    "note_ph": "A note for yourself…"
   },
   "sites": {
     "title": "Career sites",

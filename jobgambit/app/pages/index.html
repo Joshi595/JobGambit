@@ -6,7 +6,8 @@
 <title>JobGambit</title>
 <meta name="theme-color" content="#F2F4F6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0E1419" media="(prefers-color-scheme: dark)">
-<link rel="icon" href="data:,">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/static/favicon-192.png" sizes="192x192">
 <link rel="stylesheet" href="/static/app.css">
 <meta name="cp-token" content="{{TOKEN}}">
 <script src="/static/js/app.js"></script>
@@ -24,7 +25,7 @@
 <a class="skip" href="#view" @click.prevent="document.getElementById('view').focus()" x-text="t('nav.skip')"></a>
 <div class="shell">
   <aside class="side">
-    <div class="brand" translate="no"><span class="mark"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg></span><span x-text="t('app')"></span></div>
+    <div class="brand" translate="no"><span class="mark"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-brand"/></svg></span><span x-text="t('app')"></span></div>
     <nav class="nav" :aria-label="t('nav.main')">
       <template x-for="g in $store.app.groups()" :key="g.id">
         <div class="group">
@@ -44,11 +45,11 @@
 
   <header class="topbar">
     <button class="btn ghost icon" :aria-label="t('nav.menu')" @click="$refs.menu.showModal()"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-menu"/></svg></button>
-    <div class="brand" translate="no"><span class="mark"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg></span><span x-text="t('app')"></span></div>
+    <div class="brand" translate="no"><span class="mark"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-brand"/></svg></span><span x-text="t('app')"></span></div>
   </header>
   <dialog class="drawer left" id="menu" x-ref="menu" @click.self="$el.close()">
     <div class="dialog-head">
-      <div class="brand" translate="no"><span class="mark"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-send"/></svg></span><span x-text="t('app')"></span></div>
+      <div class="brand" translate="no"><span class="mark"><svg class="i sm" aria-hidden="true"><use href="/static/icons.svg#i-brand"/></svg></span><span x-text="t('app')"></span></div>
       <button class="btn ghost icon" :aria-label="t('nav.close')" @click="$refs.menu.close()"><svg class="i" aria-hidden="true"><use href="/static/icons.svg#i-x"/></svg></button>
     </div>
     <nav class="nav" :aria-label="t('nav.main')">

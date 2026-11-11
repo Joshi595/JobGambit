@@ -267,6 +267,8 @@ def _by_posting(m, cands):
     return hits if 0 < len(hits) < len(cands) else cands
 
 
+
+
 def _by_date(m, cands):
     """A receipt comes right after the application: the one candidate sent 0–3 days before the mail."""
     try:
@@ -661,6 +663,7 @@ def _one(m: dict, rows: list[dict], address: str, out: dict):
     with db() as con:
         if row:
             record(con, row, m, signal, new, at)
+    with db() as con:
         con.execute("insert or ignore into mail_items(msg_id, date, frm, subject, thread, signal, snippet, app_id, candidates, at,"
                     " body, summary, auto, done, note) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (m["id"], m["date"], m["frm"], m["subject"], m["thread"], signal or "", m["snippet"],

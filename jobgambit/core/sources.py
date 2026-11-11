@@ -135,7 +135,7 @@ def job(title, company, location, url, source, posted="", desc="", country=""):
 EXPIRED = [r"diese stelle (ist )?(nicht mehr|bereits) (verfugbar|besetzt|vergeben|aktiv)",
            r"(stellenangebot|stellenanzeige) (ist )?nicht mehr (verfugbar|aktiv|online)",
            r"\bjob nicht mehr verfugbar", r"stellenanzeige wurde nicht gefunden",
-           r"bewerbungsfrist (ist )?(abgelaufen|vorbei)", r"no longer accepting applications",
+           r"bewerbungsfrist (ist )?(abgelaufen|vorbei)", r"no longer accepting applications", r"nicht (mehr|langer) vakant",
            r"(job|position|posting|role|vacancy) (is )?no longer (available|open|active)",
            r"this (job|role|position|vacancy) (has been|is) closed", r"applications? (are|is|have been) closed",
            r"has (already )?been filled", r"\bjob expired\b", r"offre (n'est plus|expiree|pourvue)", r"oferta (caducada|cerrada|expirada)"]
@@ -146,6 +146,16 @@ APPLY = r"\b(apply now|apply for this|jetzt bewerben|online bewerben|bewerben|po
 
 def fold(text):
     return " ".join(unicodedata.normalize("NFKD", plain(text)).encode("ascii", "ignore").decode().lower().split())
+
+
+def expiry(text: str) -> str:
+    """The words that say a posting is gone, or '': never inside a condition ("until the position is filled")."""
+    t = fold(text)
+    for pat in EXPIRED:
+        m = re.search(pat, t)
+        if m and not re.search(CONDITIONAL, " ".join(t[:m.start()].split()[-10:])):
+            return m.group(0)
+    return ""
 
 
 def classify(status, text, url="", final_url=""):
@@ -160,10 +170,9 @@ def classify(status, text, url="", final_url=""):
     t = fold(text)
     if status in (403, 429) or status >= 500 or re.search(CHALLENGE, t):
         return "uncertain", f"HTTP {status} or a bot check"
-    for pat in EXPIRED:
-        m = re.search(pat, t)
-        if m and not re.search(CONDITIONAL, " ".join(t[:m.start()].split()[-10:])):
-            return "expired", m.group(0)
+    gone = expiry(text)
+    if gone:
+        return "expired", gone
     if re.search(APPLY, t):
         return "active", "apply button found"
     return ("uncertain", "short page") if len(t) < 300 else ("active", "no expiry text")
@@ -696,7 +705,7 @@ def ats_in(body: str, url: str):
 
 
 def posted_ok(posted: str, days: int) -> bool:
-    for fmt in ("%Y-%m-%d", "%d.%m.%y", "%m/%d/%y"):  # boards also give German 14.10.26 and US 10/14/26
+    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d.%m.%y", "%m/%d/%y"):  # boards also give German 23.10.2026, 14.10.26 and US 10/14/26
         try:
             return datetime.strptime(posted[:10], fmt).date() >= date.fromordinal(date.today().toordinal() - days)
         except ValueError:

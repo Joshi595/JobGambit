@@ -1,10 +1,16 @@
 name: tests
-on: [push, pull_request]
+on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+concurrency:  # a newer push to the same branch cancels the run still going
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 # Actions are pinned to a commit (a tag can be moved to other code); Dependabot proposes updates.
 jobs:
   test:
+    # Private repos pay for minutes (macOS x10, Windows x2): there the matrix runs only when started by hand.
+    # Public repos run it free on every push.
+    if: ${{ !github.event.repository.private || github.event_name == 'workflow_dispatch' }}
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +29,8 @@ jobs:
       - run: uv export --format requirements-txt --no-dev --no-emit-project -o requirements.txt
       - run: uvx pip-audit --disable-pip -r requirements.txt
   canary:  # the live job sources still answer (maintainers only; never blocks a merge)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Private repo: by hand only (the daily app's own fetches show a broken source). Public: each push to main.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && !github.event.repository.private) }}
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
